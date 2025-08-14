@@ -118,6 +118,7 @@
       .btn{width:100%}
     }
   </style>
+  <script src="vendor/three/three.min.js"></script>
 </head>
 <body>
   <!-- Главное меню -->
@@ -266,18 +267,11 @@ async function copyText(text){
   }
 }
 
-async function loadLibs(){
-  return {
-    THREE: await import('./vendor/three/three.module.js'),
-    PLC: (await import('./vendor/three/PointerLockControls.js')).PointerLockControls
-  };
-}
-
-(async ()=>{
+(()=>{
   let THREE, PointerLockControls;
   try{
-    const libs = await loadLibs();
-    THREE = libs.THREE; PointerLockControls = libs.PLC;
+    THREE = window.THREE; PointerLockControls = window.THREE.PointerLockControls;
+    if (!THREE || !PointerLockControls) throw new Error('THREE or controls missing');
   }catch(e){
     console.error(e);
     showToast('Не удалось загрузить three.js', 'err', 3000);
@@ -320,7 +314,37 @@ async function loadLibs(){
   document.body.appendChild(renderer.domElement);
   let mapRenderer; // will be created later for 3D map
 
-  const controls = new PointerLockControls(camera, renderer.domElement);
+  class SimplePointerLockControls{
+    constructor(camera, domElement){
+      this.camera = camera; this.domElement = domElement; this.isLocked = false;
+      this._obj = new THREE.Object3D(); this._obj.add(this.camera);
+      this._onMouseMove = (e)=>{
+        if (!this.isLocked) return;
+        const sens = 0.003;
+        let yaw = this.camera.rotation.y - e.movementX * sens;
+        let pitch = this.camera.rotation.x - e.movementY * sens;
+        const limit = Math.PI * 0.49;
+        if (pitch < -limit) pitch = -limit;
+        if (pitch >  limit) pitch =  limit;
+        this.camera.rotation.order = 'YXZ';
+        this.camera.rotation.y = yaw;
+        this.camera.rotation.x = pitch;
+        this.camera.rotation.z = 0;
+      };
+      this._onPointerLockChange = ()=>{ this.isLocked = (document.pointerLockElement===this.domElement); };
+      document.addEventListener('pointerlockchange', this._onPointerLockChange);
+      document.addEventListener('mousemove', this._onMouseMove);
+    }
+    getObject(){ return this._obj; }
+    lock(){ this.domElement.requestPointerLock?.(); }
+    unlock(){ document.exitPointerLock?.(); }
+    dispose(){
+      document.removeEventListener('pointerlockchange', this._onPointerLockChange);
+      document.removeEventListener('mousemove', this._onMouseMove);
+    }
+  }
+
+  const controls = new SimplePointerLockControls(camera, renderer.domElement);
   renderer.domElement.addEventListener('click', ()=>{
     if (mainMenu.style.display==='none' && !isMobile) controls.lock();
   });
