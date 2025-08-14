@@ -442,6 +442,22 @@ async function loadLibs(){
           else if (r < pTree+pWater+pStairs) { obstacles[y][x]=3; }
         }
       }
+      // Place up to 2 jump pads (type 4): stepping grants a powerful jump
+      let candidates = [];
+      for (let y=1;y<H-1;y++){
+        for (let x=1;x<W-1;x++){
+          if (maze[y][x]!==0) continue;
+          if (obstacles[y][x]!==0) continue;
+          if ((x===1&&y===1) || (x===exitCell.x && y===exitCell.y)) continue;
+          candidates.push({x,y});
+        }
+      }
+      // Shuffle using rngBiome
+      for (let i=candidates.length-1;i>0;i--){ const j=rngBiome.int(i+1); const t=candidates[i]; candidates[i]=candidates[j]; candidates[j]=t; }
+      const padCount = Math.min(2, candidates.length);
+      for (let i=0;i<padCount;i++){
+        const c = candidates[i]; obstacles[c.y][c.x] = 4;
+      }
       if (isReachable()) break;
       attempt++; rngBiome.set((rngBiome.raw() ^ 0x9E3779B9)>>>0);
     }
@@ -457,7 +473,8 @@ async function loadLibs(){
         const nx=x+dx, ny=y+dy;
         if (nx<0||ny<0||nx>=W||ny>=H) continue;
         if (maze[ny][nx]!==0) continue;
-        if (obstacles[ny][nx]!==0) continue;
+        const ot = obstacles[ny][nx]||0;
+        if (ot!==0 && ot!==4) continue; // pads are passable
         const k=nx+','+ny;
         if (!vis.has(k)){ vis.add(k); q.push([nx,ny]); }
       }
@@ -473,6 +490,7 @@ async function loadLibs(){
     const leafMat  = new THREE.MeshLambertMaterial({ color:0x2ecc71 });
     const waterMat = new THREE.MeshPhongMaterial({ color:0x2980b9, transparent:true, opacity:0.8, shininess:50 });
     const stairMat = new THREE.MeshLambertMaterial({ color:0xc0c0c0 });
+    const padMat   = new THREE.MeshLambertMaterial({ color:0x00d0ff, emissive:0x003355, emissiveIntensity:0.8 });
 
     const W = maze[0].length, H = maze.length;
     for (let y=0;y<H;y++) for (let x=0;x<W;x++){
@@ -490,6 +508,11 @@ async function loadLibs(){
         const stair = new THREE.Mesh(new THREE.BoxGeometry(cellSize*0.9, 1.0, cellSize*0.9), stairMat);
         stair.position.set(cx, 0.5, cz); stair.rotation.y = (x+y)%2 ? Math.PI/4 : -Math.PI/4;
         biomeGroup.add(stair);
+      }else if (t===4){
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.8,1.8,0.22,20), padMat);
+        pad.position.set(cx, 0.11, cz); biomeGroup.add(pad);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.08, 8, 32), padMat);
+        ring.position.set(cx, 0.3, cz); ring.rotation.x = Math.PI/2; biomeGroup.add(ring);
       }
     }
   }
@@ -658,6 +681,7 @@ async function loadLibs(){
       if (t===1) return 3.6;
       if (t===2) return 0.25;
       if (t===3) return 1.0;
+      if (t===4) return 0.0; // jump pad is flat
     }
     return 0;
   }
@@ -779,10 +803,16 @@ async function loadLibs(){
   let fps = 0, _fpsAccum = 0, _fpsFrames = 0;
 
   let velY = 0;
-  const GRAV = -25, JUMP_V = 8, FLY_V = 10;
+  const GRAV = -25, JUMP_V = 8, JUMP_V_PAD = 16, FLY_V = 10;
   let onGround = true, isFlying = false, lastSpaceTime = 0;
   let buyHold=false, buyStart=0;
   let deathCooldownUntil = 0;
+
+  function isOnJumpPad(){
+    if (gameMode!=='biomes' || !obstacles) return false;
+    const c = playerCell();
+    return (obstacles[c.y]?.[c.x]===4);
+  }
 
   window.addEventListener('keydown', e=>{
     keys[e.code]=true;
@@ -826,7 +856,7 @@ async function loadLibs(){
         isFlying = !isFlying;
         if (isFlying){ velY=0; onGround=false; }
       }else{
-        if (!isFlying && onGround){ velY = JUMP_V; onGround=false; }
+        if (!isFlying && onGround){ velY = isOnJumpPad() ? JUMP_V_PAD : JUMP_V; onGround=false; }
       }
       lastSpaceTime = now;
     }
@@ -995,7 +1025,7 @@ async function loadLibs(){
     if (now - tapTime < 300){
       isFlying = !isFlying; if (isFlying){ velY=0; onGround=false; }
     }else{
-      if (!isFlying && onGround){ velY=JUMP_V; onGround=false; }
+      if (!isFlying && onGround){ velY = isOnJumpPad() ? JUMP_V_PAD : JUMP_V; onGround=false; }
     }
     tapTime=now; keys['Space']=true;
   }, {passive:false});
