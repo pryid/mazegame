@@ -135,7 +135,8 @@
       </div>
       <p style="margin-top:16px;font-size:12px;opacity:.85">
         Управление (ПК): клик по игре — захват мыши; WASD — ходьба; Space — прыжок; двойной Space — полёт; Shift — снижение;
-        M — 3D-карта (1 покупка за 20 на уровень); 1 — сохранить; 2 — загрузить; 3 — +100; 4 — меню.
+        M — 3D-карта (1 покупка за 20 на уровень); 0 — отладка (FPS/метрики); Q — качество (LOW/MED/HIGH);
+        1 — сохранить; 2 — загрузить; 3 — +100; 4 — меню.
         На мобильных: левый стик (ходьба), свайп справа (взгляд), «Прыжок/Снижение», «Карта», «Сохранить», «На весь экран», «Меню».
       </p>
     </div>
@@ -241,6 +242,12 @@ const btnSave  = document.getElementById('btnSave');
 const btnFS    = document.getElementById('btnFS');
 const btnMenu  = document.getElementById('btnMenu');
 
+// Debug panel element (hidden by default)
+const debugPanel = document.createElement('div');
+debugPanel.id = 'debugPanel';
+debugPanel.style.cssText = 'margin-top:8px; font:12px/1.2 monospace; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,.2); border-radius:8px; padding:6px 8px; display:none; max-width:72vw; white-space:pre-wrap;';
+document.getElementById('overlay').appendChild(debugPanel);
+
 function showToast(msg, type='success', ms=2200){
   const el = document.createElement('div');
   el.className = `toast ${type}`;
@@ -261,8 +268,8 @@ async function copyText(text){
 
 async function loadLibs(){
   return {
-    THREE: await import('https://esm.sh/three@0.155.0'),
-    PLC: (await import('https://esm.sh/three@0.155.0/examples/jsm/controls/PointerLockControls.js')).PointerLockControls
+    THREE: await import('./vendor/three/three.module.js'),
+    PLC: (await import('./vendor/three/PointerLockControls.js')).PointerLockControls
   };
 }
 
@@ -303,9 +310,15 @@ async function loadLibs(){
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 2000);
   camera.rotation.order = 'YXZ';
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+  // Quality preset and pixel ratio cap; adjusted later
+  let quality = 'high';
+  let pixelRatioCap = 2;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
+  if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
+  let mapRenderer; // will be created later for 3D map
 
   const controls = new PointerLockControls(camera, renderer.domElement);
   renderer.domElement.addEventListener('click', ()=>{
@@ -317,10 +330,29 @@ async function loadLibs(){
   const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(20,40,10); scene.add(sun);
 
   const texLoader = new THREE.TextureLoader();
-  const grass = texLoader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r155/examples/textures/terrain/grasslight-big.jpg');
-  grass.wrapS = grass.wrapT = THREE.RepeatWrapping; grass.anisotropy = 8;
-  const brick = texLoader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r155/examples/textures/brick_diffuse.jpg');
-  brick.wrapS = brick.wrapT = THREE.RepeatWrapping; brick.anisotropy = 8;
+  const grass = texLoader.load('assets/textures/grasslight-big.jpg');
+  grass.wrapS = grass.wrapT = THREE.RepeatWrapping; grass.anisotropy = 8; if (THREE.SRGBColorSpace) grass.colorSpace = THREE.SRGBColorSpace;
+  const brick = texLoader.load('assets/textures/brick_diffuse.jpg');
+  brick.wrapS = brick.wrapT = THREE.RepeatWrapping; brick.anisotropy = 8; if (THREE.SRGBColorSpace) brick.colorSpace = THREE.SRGBColorSpace;
+  // Quality apply function (after textures are available)
+  function applyQuality(level){
+    quality = level || quality;
+    const isMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Windows Phone/i.test(navigator.userAgent)
+                      || (('ontouchstart' in window) && window.matchMedia('(max-width: 900px)').matches);
+    const baseCap = isMobile ? 1.5 : 2;
+    const cap = (quality==='low') ? 1.0 : (quality==='med') ? Math.min(baseCap, 1.5) : baseCap;
+    pixelRatioCap = cap;
+    const ratio = Math.min(window.devicePixelRatio || 1, pixelRatioCap);
+    renderer.setPixelRatio(ratio);
+    if (typeof mapRenderer !== 'undefined' && mapRenderer) {
+      mapRenderer.setPixelRatio(ratio);
+    }
+    const maxAniso = renderer.capabilities.getMaxAnisotropy?.() || 8;
+    const aniso = (quality==='low') ? Math.min(2, maxAniso) : (quality==='med') ? Math.min(4, maxAniso) : Math.min(8, maxAniso);
+    if (grass && 'anisotropy' in grass) grass.anisotropy = aniso;
+    if (brick && 'anisotropy' in brick) brick.anisotropy = aniso;
+  }
+  applyQuality(quality);
 
   const floorMat = new THREE.MeshLambertMaterial({ map: grass });
   const wallMat  = new THREE.MeshLambertMaterial({ map: brick });
@@ -353,6 +385,7 @@ async function loadLibs(){
 
   let maze=[], mazeGroup=null, exitMesh=null, exitCell={x:0,y:0};
   let biomeGroup=null, obstacles=null;
+  const _tmpObj = new THREE.Object3D();
   function buildMazeMesh(){
     if (mazeGroup) scene.remove(mazeGroup);
     mazeGroup = new THREE.Group(); scene.add(mazeGroup);
@@ -365,13 +398,24 @@ async function loadLibs(){
     floor.material.map.repeat.set(W, H);
     mazeGroup.add(floor);
 
+    let wallCount=0;
     for (let y=0;y<H;y++)
-      for (let x=0;x<W;x++)
-        if (maze[y][x]===1){
-          const wall = new THREE.Mesh(wallGeo, wallMat);
-          wall.position.set((x+0.5)*cellSize, WALL_HEIGHT/2, (y+0.5)*cellSize);
-          mazeGroup.add(wall);
+      for (let x=0;x<W;x++) if (maze[y][x]===1) wallCount++;
+    if (wallCount>0){
+      const inst = new THREE.InstancedMesh(wallGeo, wallMat, wallCount);
+      let i=0;
+      for (let y=0;y<H;y++){
+        for (let x=0;x<W;x++){
+          if (maze[y][x]!==1) continue;
+          _tmpObj.position.set((x+0.5)*cellSize, WALL_HEIGHT/2, (y+0.5)*cellSize);
+          _tmpObj.rotation.set(0,0,0);
+          _tmpObj.updateMatrix();
+          inst.setMatrixAt(i++, _tmpObj.matrix);
         }
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      mazeGroup.add(inst);
+    }
 
     const ex=W-2, ey=H-2;
     exitCell = {x:ex, y:ey};
@@ -405,9 +449,9 @@ async function loadLibs(){
   }
   function isReachable(){
     const W = maze[0].length, H = maze.length;
-    const q=[[1,1]]; const vis=new Set(['1,1']);
-    while (q.length){
-      const [x,y]=q.shift();
+    const q=[[1,1]]; let qi=0; const vis=new Set(['1,1']);
+    while (qi<q.length){
+      const [x,y]=q[qi++];
       if (x===exitCell.x && y===exitCell.y) return true;
       const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
       for (const [dx,dy] of dirs){
@@ -489,8 +533,8 @@ async function loadLibs(){
   }
 
   /* 3D-карта */
-  const mapRenderer = new THREE.WebGLRenderer({ canvas: mapCanvas, alpha:true, antialias:true });
-  mapRenderer.setPixelRatio(window.devicePixelRatio);
+  mapRenderer = new THREE.WebGLRenderer({ canvas: mapCanvas, alpha:true, antialias:true });
+  mapRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
   mapRenderer.setClearColor(0x000000, 0);
   const mapScene = new THREE.Scene();
   const mapCam = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
@@ -498,6 +542,7 @@ async function loadLibs(){
   mapScene.add(new THREE.AmbientLight(0xffffff, 0.6)); mapScene.add(mapLight);
 
   let mapMazeGroup=null, mapDiamonds=[], mapPlayer=null, mapExit=null;
+  let lastMapMask = null;
   function buildMapScene(){
     if (mapMazeGroup) mapScene.remove(mapMazeGroup);
     mapMazeGroup = new THREE.Group(); mapScene.add(mapMazeGroup);
@@ -510,11 +555,26 @@ async function loadLibs(){
     mapMazeGroup.add(gFloor);
 
     const wMat = new THREE.MeshBasicMaterial({ color:0xffffff, wireframe:true });
-    for (let y=0;y<H;y++) for (let x=0;x<W;x++) if (maze[y][x]===1){
-      const w = new THREE.Mesh(wallGeo, wMat);
-      w.position.set((x+0.5)*cellSize, WALL_HEIGHT/2, (y+0.5)*cellSize); mapMazeGroup.add(w);
+    let wCount=0;
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) if (maze[y][x]===1) wCount++;
+    if (wCount>0){
+      const instW = new THREE.InstancedMesh(wallGeo, wMat, wCount);
+      let wi=0;
+      for (let y=0;y<H;y++){
+        for (let x=0;x<W;x++){
+          if (maze[y][x]!==1) continue;
+          _tmpObj.position.set((x+0.5)*cellSize, WALL_HEIGHT/2, (y+0.5)*cellSize);
+          _tmpObj.rotation.set(0,0,0);
+          _tmpObj.updateMatrix();
+          instW.setMatrixAt(wi++, _tmpObj.matrix);
+        }
+      }
+      instW.instanceMatrix.needsUpdate = true;
+      mapMazeGroup.add(instW);
     }
 
+    // build diamonds once per current mask
+    lastMapMask = buildMaskBigInt();
     for (const d of diamonds){
       const m = new THREE.Mesh(
         d.userData.type==='S' ? superDiamondGeo : diamondGeo,
@@ -545,14 +605,18 @@ async function loadLibs(){
       mapPlayer.position.set(p.x, 3, p.z);
       mapPlayer.rotation.set(0, camera.rotation.y, 0);
     }
-    for (const m of mapDiamonds) mapScene.remove(m);
-    mapDiamonds = [];
-    for (const d of diamonds){
-      const m = new THREE.Mesh(
-        d.userData.type==='S' ? superDiamondGeo : diamondGeo,
-        new THREE.MeshBasicMaterial({ color: d.userData.type==='S' ? 0x9b59b6 : 0x00ffff })
-      );
-      m.position.copy(d.position); mapScene.add(m); mapDiamonds.push(m);
+    const curMask = buildMaskBigInt();
+    if (lastMapMask===null || curMask!==lastMapMask){
+      for (const m of mapDiamonds) mapScene.remove(m);
+      mapDiamonds = [];
+      for (const d of diamonds){
+        const m = new THREE.Mesh(
+          d.userData.type==='S' ? superDiamondGeo : diamondGeo,
+          new THREE.MeshBasicMaterial({ color: d.userData.type==='S' ? 0x9b59b6 : 0x00ffff })
+        );
+        m.position.copy(d.position); mapScene.add(m); mapDiamonds.push(m);
+      }
+      lastMapMask = curMask;
     }
     mapRenderer.render(mapScene, mapCam);
   }
@@ -711,6 +775,10 @@ async function loadLibs(){
   let canExit=false, exitStartT=0, onExitCellLast=false;
   const keys = Object.create(null);
 
+  // Debug state and FPS counters
+  let debugOn = false;
+  let fps = 0, _fpsAccum = 0, _fpsFrames = 0;
+
   let velY = 0;
   const GRAV = -25, JUMP_V = 8, FLY_V = 10;
   let onGround = true, isFlying = false, lastSpaceTime = 0;
@@ -721,6 +789,17 @@ async function loadLibs(){
     keys[e.code]=true;
 
     if (e.code==='KeyM') toggleMap();
+    if (e.code==='Digit0'){
+      debugOn = !debugOn;
+      debugPanel.style.display = debugOn ? 'block' : 'none';
+      showToast(debugOn ? 'Debug ON (0)' : 'Debug OFF (0)', debugOn ? 'success' : 'warn');
+    }
+    if (e.code==='KeyQ'){
+      const order=['low','med','high'];
+      const idx = order.indexOf(quality);
+      applyQuality(order[(idx+1)%order.length]);
+      showToast(`Качество: ${quality.toUpperCase()}`, 'success');
+    }
     if (e.code==='Digit1'){
       const code=encodeSave();
       copyText(code).then(()=>showToast(`Сохранение скопировано: ${code}`, 'success', 2600));
@@ -948,7 +1027,11 @@ async function loadLibs(){
 
   function animate(){
     requestAnimationFrame(animate);
-    const dt = clock.getDelta();
+    const dt = Math.min(0.033, clock.getDelta());
+
+    // FPS accumulation
+    _fpsFrames++; _fpsAccum += dt;
+    if (_fpsAccum >= 0.5){ fps = Math.round(_fpsFrames / _fpsAccum); _fpsFrames = 0; _fpsAccum = 0; }
 
     let ax=0, az=0;
     if (keys['KeyW']) az += 1;
@@ -1007,7 +1090,7 @@ async function loadLibs(){
     pos.z = Math.max(0.25, Math.min(H-0.25, pos.z));
 
     diamonds = diamonds.filter(d=>{
-      if (pos.distanceTo(d.position) < 1.6){
+      if (pos.distanceToSquared(d.position) < 2.56){
         const val = (d.userData.type==='S') ? 20 : 1;
         diamondCount += val; totalDiamonds += val;
         diamondUI.textContent=diamondCount; totalUI.textContent=totalDiamonds; updateHUD();
@@ -1039,6 +1122,18 @@ async function loadLibs(){
     onExitCellLast = onExit;
 
     renderer.render(scene, camera);
+    if (debugOn){
+      const p = controls.getObject().position;
+      const c = playerCell();
+      const info = renderer.info;
+      debugPanel.textContent =
+        `FPS: ${fps} | Quality: ${quality}\n`+
+        `DrawCalls: ${info.render.calls}  Tris: ${info.render.triangles}  Lines: ${info.render.lines}  Points: ${info.render.points}\n`+
+        `Pos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}  Cell: ${c.x}, ${c.y}\n`+
+        `Mode: ${gameMode}  Flying: ${isFlying}  Ground: ${onGround}  velY: ${velY.toFixed(2)}\n`+
+        `Diamonds: carry ${diamondCount} / total ${totalDiamonds}  Levels: ${levelsCleared}\n`+
+        `Seeds: maze ${mazeSeed}  diam ${diamondsSeed}  biome ${biomeSeed}  Map: ${mapUnlocked}  Jump: ${jumpUnlockedClassic}`;
+    }
     updateMapScene();
   }
 
