@@ -126,7 +126,7 @@
       <h1>Maze Diamond Hunt</h1>
       <p>Вставьте код сохранения и продолжите, или начните новый забег: классический / с биомами и препятствиями.</p>
       <div class="menuRow">
-        <input id="menuSaveInput" class="input" placeholder="Код сохранения (v8)" />
+        <input id="menuSaveInput" class="input" placeholder="Код сохранения" />
         <button id="btnContinue" class="btn">Продолжить по коду</button>
       </div>
       <div class="menuRow">
@@ -208,7 +208,7 @@
   </div>
 
 <script type="module">
-/* ===== v8 (HUD icons, same save format) ===== */
+/* ===== Save system with optional mouse suffix ===== */
 
 const diamondUI = document.getElementById('diamondCount');
 const totalUI   = document.getElementById('totalDiamonds');
@@ -553,7 +553,7 @@ async function loadLibs(){
   const mapLight = new THREE.DirectionalLight(0xffffff, 0.9); mapLight.position.set(100,200,100);
   mapScene.add(new THREE.AmbientLight(0xffffff, 0.6)); mapScene.add(mapLight);
 
-  let mapMazeGroup=null, mapDiamonds=[], mapPlayer=null, mapExit=null;
+  let mapMazeGroup=null, mapDiamonds=[], mapPlayer=null, mapExit=null, mapMice=[];
   let lastMapMask = null;
   function buildMapScene(){
     if (mapMazeGroup) mapScene.remove(mapMazeGroup);
@@ -601,6 +601,12 @@ async function loadLibs(){
       mapPlayer = new THREE.Mesh(new THREE.ConeGeometry(2.2, 4, 16), new THREE.MeshBasicMaterial({ color:0xff3333 }));
       mapScene.add(mapPlayer);
     }
+    // reset mice markers
+    for (const mk of mapMice) mapScene.remove(mk); mapMice=[];
+    for (const m of mice){
+      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xb0b0b0 }));
+      mk.position.copy(m.group.position); mapScene.add(mk); mapMice.push(mk);
+    }
     // Mouse marker (optional)
     if (mouseActive && mouse){
       const m = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xaaaaaa }));
@@ -635,10 +641,11 @@ async function loadLibs(){
       }
       lastMapMask = curMask;
     }
-    // update mouse marker
-    if (mouseActive && mouse){
-      const m = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xaaaaaa }));
-      m.position.copy(mouse.position); mapScene.add(m); mapDiamonds.push(m);
+    // update mice markers
+    for (const mk of mapMice) mapScene.remove(mk); mapMice=[];
+    for (const m of mice){
+      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xb0b0b0 }));
+      mk.position.copy(m.group.position); mapScene.add(mk); mapMice.push(mk);
     }
     mapRenderer.render(mapScene, mapCam);
   }
@@ -647,9 +654,8 @@ async function loadLibs(){
   let diamondCount=0, totalDiamonds=0, levelsCleared=0, mapUnlocked=false;
   let gameMode = 'classic';
   let jumpUnlockedClassic = false;
-  // Mouse (mob) state
-  let mouse=null, mouseActive=false, mouseTarget=null, mouseLastCell=null;
-  const mouseSpeed = 8; // units per second
+  // Mice (mob) state
+  const mice=[]; const MOUSE_SPEED=8; const MOUSE_HALF_H=0.5;
 
   function updateHUD(){
     // counts are updated via textContent, here update perk states/visibility
@@ -697,7 +703,7 @@ async function loadLibs(){
     return posY <= h + playerRadius*0.6;
   }
 
-  /* Сейвы (v8) */
+  /* Сейвы */
   function base36FromBigInt(x){ return x.toString(36).toUpperCase(); }
   function bigIntFromBase36(str){ let x=0n; for (const ch of str.trim().toLowerCase()){
     const c=ch.charCodeAt(0); let v; if (c>=48&&c<=57) v=BigInt(c-48); else if (c>=97&&c<=122) v=BigInt(c-87); else continue; x=x*36n+v; } return x; }
@@ -754,10 +760,24 @@ async function loadLibs(){
     code=(code<<1n)|jump;
     code=(code<<15n)|mask;
 
-    return base36FromBigInt(code);
+    let base = base36FromBigInt(code);
+    // mice suffix: m + count (base36) + pairs of gx gz in base36 (nibbles)
+    const mx = Math.min(mice.length, 15);
+    if (mx>0){
+      let suf = 'm' + mx.toString(36);
+      for (let i=0;i<mx;i++){
+        const g = mice[i];
+        const gx = Math.max(0, Math.min(15, Math.floor(g.group.position.x / cellSize)));
+        const gz = Math.max(0, Math.min(15, Math.floor(g.group.position.z / cellSize)));
+        suf += gx.toString(36) + gz.toString(36);
+      }
+      base = base + '-' + suf;
+    }
+    return base;
   }
   function decodeSave(str){
-    const x0 = bigIntFromBase36(str); let x=x0;
+    const [core, suffix] = String(str).split('-');
+    const x0 = bigIntFromBase36(core); let x=x0;
     const mask   = x & ((1n<<15n)-1n);  x >>= 15n;
     const jump   = x & 1n;              x >>= 1n;
     const map    = x & 1n;              x >>= 1n;
@@ -777,11 +797,23 @@ async function loadLibs(){
     const mseed  = x & ((1n<<11n)-1n);  x >>= 11n;
     const v      = x & ((1n<<4n)-1n);
     if (Number(v)!==8) throw new Error('Неподдерживаемая версия сейва (v8)');
+    // parse mice from suffix if present
+    let miceArr = [];
+    if (suffix && suffix[0]==='m'){
+      const cnt = parseInt(suffix[1], 36) || 0;
+      for (let i=0;i<cnt;i++){
+        const gxCh = suffix[2 + i*2];
+        const gzCh = suffix[2 + i*2 + 1];
+        if (!gxCh || !gzCh) break;
+        const gxv = parseInt(gxCh, 36); const gzv = parseInt(gzCh, 36);
+        if (isFinite(gxv) && isFinite(gzv)) miceArr.push({gx:gxv&0xF, gz:gzv&0xF});
+      }
+    }
     return {
       mseed:Number(mseed), dseed:Number(dseed), bseed:Number(bseed),
       mode:Boolean(mode), gx:Number(gx), gz:Number(gz), fx:Number(fx), fz:Number(fz),
       y:Number(y5), fly:(fly===1n), yaw:Number(yaw5), pitch:Number(pitch5),
-      total:Number(total), levels:Number(levels), map: (map===1n), jump:(jump===1n), mask
+      total:Number(total), levels:Number(levels), map: (map===1n), jump:(jump===1n), mask, mice:miceArr
     };
   }
   function isValidSave(str){
@@ -793,6 +825,7 @@ async function loadLibs(){
       if (d.yaw<0||d.yaw>31||d.pitch<0||d.pitch>31) return false;
       if (d.total<0||d.total>511) return false;
       if (d.levels<0||d.levels>31) return false;
+      if (d.mice && d.mice.some(m=>m.gx<0||m.gx>15||m.gz<0||m.gz>15)) return false;
       return true;
     }catch{ return false; }
   }
@@ -838,7 +871,7 @@ async function loadLibs(){
       for (const k in keys) keys[k]=false;
     }
     if (e.code==='Digit2'){
-      const code=prompt('Вставьте код сохранения (v8):');
+      const code=prompt('Вставьте код сохранения:');
       if (code) loadFromCode(code.trim());
       for (const k in keys) keys[k]=false;
     }
@@ -911,7 +944,6 @@ async function loadLibs(){
 
   function spawnMouse(force){
     if (gameMode!=='biomes') return;
-    if (mouseActive){ if (force) showToast('Мышь уже на уровне', 'warn'); return; }
     if (!force){ if (rngBiome.float() >= 0.05) return; }
     // pick random passable cell far-ish from player
     const W = maze[0].length, H = maze.length;
@@ -925,61 +957,80 @@ async function loadLibs(){
     }
     if (!picks.length) return;
     const p = picks[rngBiome.int(picks.length)];
-    // build mouse model (lowpoly)
+    // improved low-poly mouse model
     const group = new THREE.Group();
-    const bodyMat = new THREE.MeshLambertMaterial({ color:0x8e6e53 });
+    const bodyMat = new THREE.MeshLambertMaterial({ color:0x9c7b60 });
     const earMat  = new THREE.MeshLambertMaterial({ color:0x6d4c41 });
-    const noseMat = new THREE.MeshLambertMaterial({ color:0x3e2723 });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 14, 12), bodyMat); body.scale.set(1.2,0.8,1.8); body.position.set(0,0.5,0); group.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 12), bodyMat); head.scale.set(1,0.9,1.1); head.position.set(0,0.55,0.85); group.add(head);
-    const earL = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), earMat); earL.position.set(-0.25,0.95,0.6); group.add(earL);
+    const darkMat = new THREE.MeshLambertMaterial({ color:0x2d2a26 });
+    const pinkMat = new THREE.MeshLambertMaterial({ color:0xc48a84 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 20, 16), bodyMat); body.scale.set(1.4,0.9,2.0); body.position.set(0,0.45,0); group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 14), bodyMat); head.scale.set(1.0,0.9,1.1); head.position.set(0,0.5,0.95); group.add(head);
+    const earL = new THREE.Mesh(new THREE.ConeGeometry(0.18,0.22,14), earMat); earL.position.set(-0.22,0.95,0.6); earL.rotation.x = Math.PI; group.add(earL);
     const earR = earL.clone(); earR.position.x*=-1; group.add(earR);
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), noseMat); nose.position.set(0,0.48,1.2); group.add(nose);
-    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.05,1.4,8), earMat); tail.position.set(0,0.6,-0.9); tail.rotation.x = Math.PI/4; group.add(tail);
-    group.position.set((p.x+0.5)*cellSize, 2, (p.y+0.5)*cellSize);
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), darkMat); eyeL.position.set(-0.14,0.56,1.12); group.add(eyeL);
+    const eyeR = eyeL.clone(); eyeR.position.x*=-1; group.add(eyeR);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat); nose.position.set(0,0.48,1.3); group.add(nose);
+    const whiskerMat = new THREE.MeshLambertMaterial({ color:0xdddddd });
+    const whisk1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.6,6), whiskerMat); whisk1.position.set(0.25,0.48,1.22); whisk1.rotation.z = Math.PI/8; whisk1.rotation.x = Math.PI/2; group.add(whisk1);
+    const whisk2 = whisk1.clone(); whisk2.position.x = -0.25; whisk2.rotation.z = -Math.PI/8; group.add(whisk2);
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.05,1.6,10), pinkMat); tail.position.set(0,0.55,-1.05); tail.rotation.x = Math.PI/3; group.add(tail);
+    const legGeo = new THREE.CylinderGeometry(0.05,0.06,0.25,8);
+    for (const sx of [-0.25,0.25]){
+      const l1 = new THREE.Mesh(legGeo, darkMat); l1.position.set(sx,0.2,0.2); group.add(l1);
+      const l2 = new THREE.Mesh(legGeo, darkMat); l2.position.set(sx,0.2,-0.2); group.add(l2);
+    }
+    group.position.set((p.x+0.5)*cellSize, MOUSE_HALF_H, (p.y+0.5)*cellSize);
     scene.add(group);
-    mouse = group; mouseActive = true; mouseTarget = null; mouseLastCell = {x:p.x,y:p.y};
+    mice.push({ group, target:null, lastCell:{x:p.x,y:p.y}, velY:0, onGround:true });
     showToast('Появилась мышь! Загоните её в тупик', 'success');
   }
-
-  function updateMouse(dt){
-    if (!mouseActive || !mouse) return;
-    // catch check
+  function updateMice(dt){
+    if (!mice.length) return;
     const pos = controls.getObject().position;
-    if (pos.distanceToSquared(mouse.position) < 2.0){
-      totalDiamonds += 50; totalUI.textContent = totalDiamonds; updateHUD();
-      scene.remove(mouse); mouse=null; mouseActive=false; showToast('+50 за мышь', 'success');
-      return;
-    }
-    const pc = playerCell();
-    const mc = { x: Math.floor(mouse.position.x / cellSize), y: Math.floor(mouse.position.z / cellSize) };
-    // choose target cell when near center or no target
-    const centerX = (mc.x+0.5)*cellSize, centerZ=(mc.y+0.5)*cellSize;
-    const atCenter = (Math.abs(mouse.position.x - centerX) < 0.05 && Math.abs(mouse.position.z - centerZ) < 0.05);
-    if (atCenter || !mouseTarget){
-      const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
-      let best=null, bestDist=-1;
-      for (const [dx,dy] of dirs){
-        const nx=mc.x+dx, ny=mc.y+dy;
-        if (!isPassableCell(nx,ny)) continue;
-        if (mouseLastCell && nx===mouseLastCell.x && ny===mouseLastCell.y) continue;
-        const cx=(nx+0.5)*cellSize, cz=(ny+0.5)*cellSize;
-        const d2 = (cx-pos.x)*(cx-pos.x) + (cz-pos.z)*(cz-pos.z);
-        if (d2>bestDist){ bestDist=d2; best={x:nx,y:ny}; }
+    for (let i=mice.length-1;i>=0;i--){
+      const m = mice[i];
+      if (pos.distanceToSquared(m.group.position) < 2.0){
+        totalDiamonds += 50; totalUI.textContent = totalDiamonds; updateHUD();
+        scene.remove(m.group); mice.splice(i,1); showToast('+50 за мышь', 'success');
+        continue;
       }
-      if (!best && mouseLastCell){ best = {x:mouseLastCell.x, y:mouseLastCell.y}; }
-      if (best){ mouseTarget = best; mouseLastCell = mc; }
-    }
-    if (mouseTarget){
-      const tx=(mouseTarget.x+0.5)*cellSize, tz=(mouseTarget.y+0.5)*cellSize;
-      const dirx = tx - mouse.position.x, dirz = tz - mouse.position.z;
-      const len = Math.hypot(dirx, dirz) || 1;
-      const step = Math.min(len, mouseSpeed*dt);
-      mouse.position.x += (dirx/len)*step;
-      mouse.position.z += (dirz/len)*step;
-      // face movement
-      const yaw = Math.atan2(dirx, dirz);
-      mouse.rotation.y = yaw;
+      const mc = { x: Math.floor(m.group.position.x / cellSize), y: Math.floor(m.group.position.z / cellSize) };
+      const centerX = (mc.x+0.5)*cellSize, centerZ=(mc.y+0.5)*cellSize;
+      const atCenter = (Math.abs(m.group.position.x - centerX) < 0.05 && Math.abs(m.group.position.z - centerZ) < 0.05);
+      if (atCenter || !m.target){
+        const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+        let best=null, bestDist=-1;
+        for (const [dx,dy] of dirs){
+          const nx=mc.x+dx, ny=mc.y+dy;
+          if (!isPassableCell(nx,ny)) continue;
+          if (m.lastCell && nx===m.lastCell.x && ny===m.lastCell.y) continue;
+          const cx=(nx+0.5)*cellSize, cz=(ny+0.5)*cellSize;
+          const d2 = (cx-pos.x)*(cx-pos.x) + (cz-pos.z)*(cz-pos.z);
+          if (d2>bestDist){ bestDist=d2; best={x:nx,y:ny}; }
+        }
+        if (!best && m.lastCell){ best = {x:m.lastCell.x, y:m.lastCell.y}; }
+        if (best){ m.target = best; m.lastCell = mc; }
+      }
+      if (m.target){
+        const tx=(m.target.x+0.5)*cellSize, tz=(m.target.y+0.5)*cellSize;
+        const dirx = tx - m.group.position.x, dirz = tz - m.group.position.z;
+        const len = Math.hypot(dirx, dirz) || 1;
+        const step = Math.min(len, MOUSE_SPEED*dt);
+        m.group.position.x += (dirx/len)*step;
+        m.group.position.z += (dirz/len)*step;
+        m.group.rotation.y = Math.atan2(dirx, dirz);
+      }
+      // vertical physics & pad jump
+      const gH = groundHeightAtWorld(m.group.position.x, m.group.position.z);
+      const groundY = gH + MOUSE_HALF_H;
+      m.velY += GRAV * dt;
+      m.group.position.y += m.velY * dt;
+      if (m.group.position.y <= groundY){
+        m.group.position.y = groundY; m.velY = 0; m.onGround = true;
+        const gx = Math.floor(m.group.position.x/cellSize), gz = Math.floor(m.group.position.z/cellSize);
+        if ((obstacles?.[gz]?.[gx]||0)===4){ m.velY = JUMP_V_PAD; m.onGround=false; }
+      }
+      if (m.group.position.y < MOUSE_HALF_H) m.group.position.y = MOUSE_HALF_H;
     }
   }
 
@@ -1240,7 +1291,7 @@ async function loadLibs(){
     onExitCellLast = onExit;
 
     renderer.render(scene, camera);
-    updateMouse(dt);
+    updateMice(dt);
     if (debugOn){
       const p = controls.getObject().position;
       const c = playerCell();
@@ -1250,7 +1301,7 @@ async function loadLibs(){
         `DrawCalls: ${info.render.calls}  Tris: ${info.render.triangles}  Lines: ${info.render.lines}  Points: ${info.render.points}\n`+
         `Pos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}  Cell: ${c.x}, ${c.y}\n`+
         `Mode: ${gameMode}  Flying: ${isFlying}  Ground: ${onGround}  velY: ${velY.toFixed(2)}\n`+
-        `Diamonds: carry ${diamondCount} / total ${totalDiamonds}  Levels: ${levelsCleared}\n`+
+        `Diamonds: carry ${diamondCount} / total ${totalDiamonds}  Levels: ${levelsCleared}  Mice: ${mice.length}\n`+
         `Seeds: maze ${mazeSeed}  diam ${diamondsSeed}  biome ${biomeSeed}  Map: ${mapUnlocked}  Jump: ${jumpUnlockedClassic}`;
     }
     updateMapScene();
@@ -1328,14 +1379,47 @@ async function loadLibs(){
       isFlying = d.fly && (gameMode!=='classic' || jumpUnlockedClassic);
       velY=0; onGround = !isFlying && (controls.getObject().position.y<=2.01);
 
+      // spawn mice from save
+      if (gameMode==='biomes' && d.mice && d.mice.length){
+        for (const m of d.mice){
+          // place only on passable cells
+          if (isPassableCell(m.gx, m.gz)){
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshLambertMaterial({ color:0x9c7b60 });
+            const earMat  = new THREE.MeshLambertMaterial({ color:0x6d4c41 });
+            const darkMat = new THREE.MeshLambertMaterial({ color:0x2d2a26 });
+            const pinkMat = new THREE.MeshLambertMaterial({ color:0xc48a84 });
+            const body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 20, 16), bodyMat); body.scale.set(1.4,0.9,2.0); body.position.set(0,0.45,0); group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 14), bodyMat); head.scale.set(1.0,0.9,1.1); head.position.set(0,0.5,0.95); group.add(head);
+            const earL = new THREE.Mesh(new THREE.ConeGeometry(0.18,0.22,14), earMat); earL.position.set(-0.22,0.95,0.6); earL.rotation.x = Math.PI; group.add(earL);
+            const earR = earL.clone(); earR.position.x*=-1; group.add(earR);
+            const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), darkMat); eyeL.position.set(-0.14,0.56,1.12); group.add(eyeL);
+            const eyeR = eyeL.clone(); eyeR.position.x*=-1; group.add(eyeR);
+            const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat); nose.position.set(0,0.48,1.3); group.add(nose);
+            const whiskerMat = new THREE.MeshLambertMaterial({ color:0xdddddd });
+            const whisk1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.6,6), whiskerMat); whisk1.position.set(0.25,0.48,1.22); whisk1.rotation.z = Math.PI/8; whisk1.rotation.x = Math.PI/2; group.add(whisk1);
+            const whisk2 = whisk1.clone(); whisk2.position.x = -0.25; whisk2.rotation.z = -Math.PI/8; group.add(whisk2);
+            const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.05,1.6,10), pinkMat); tail.position.set(0,0.55,-1.05); tail.rotation.x = Math.PI/3; group.add(tail);
+            const legGeo = new THREE.CylinderGeometry(0.05,0.06,0.25,8);
+            for (const sx of [-0.25,0.25]){
+              const l1 = new THREE.Mesh(legGeo, darkMat); l1.position.set(sx,0.2,0.2); group.add(l1);
+              const l2 = new THREE.Mesh(legGeo, darkMat); l2.position.set(sx,0.2,-0.2); group.add(l2);
+            }
+            group.position.set((m.gx+0.5)*cellSize, MOUSE_HALF_H, (m.gz+0.5)*cellSize);
+            scene.add(group);
+            mice.push({ group, target:null, lastCell:{x:m.gx,y:m.gz}, velY:0, onGround:true });
+          }
+        }
+      }
+
       for (const k in keys) keys[k]=false;
       updateHUD();
-      showToast('Сохранение v8 загружено', 'success');
+      showToast('Сохранение загружено', 'success');
 
       if (mapCanvas.style.display!=='none') buildMapScene();
     }catch(e){
       console.error(e);
-      showToast('Неверный или повреждённый код сохранения (v8)', 'err', 2800);
+      showToast('Неверный или повреждённый код сохранения', 'err', 2800);
     }
   }
 
@@ -1366,8 +1450,8 @@ async function loadLibs(){
   btnBiomes.addEventListener('click',   ()=>startNew('biomes'));
   btnContinue.addEventListener('click', ()=>{
     const code = menuInput.value.trim();
-    if (!code){ showToast('Введите код v8', 'warn'); return; }
-    if (!isValidSave(code)){ showToast('Некорректный код v8 — игра не запущена', 'err', 3000); return; }
+    if (!code){ showToast('Введите код', 'warn'); return; }
+    if (!isValidSave(code)){ showToast('Некорректный код — игра не запущена', 'err', 3000); return; }
     mainMenu.style.display='none';
     loadFromCode(code);
     setMobileUIVisible(isMobile);
