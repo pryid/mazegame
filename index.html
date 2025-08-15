@@ -93,6 +93,10 @@
     .toast.success{border-color:rgba(90,255,120,.5)}
     .toast.warn{border-color:rgba(255,230,90,.6)}
     .toast.err{border-color:rgba(255,120,120,.6)}
+    /* ===== Rotate overlay (mobile portrait) ===== */
+    #rotateOverlay{position:fixed;inset:0;z-index:300;display:none;background:rgba(0,0,0,0.9);color:#fff;font:16px/1.4 system-ui,Segoe UI,Roboto,Arial,sans-serif;align-items:center;justify-content:center;text-align:center;padding:24px}
+    #rotateOverlay .box{max-width:480px;border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:16px 20px;background:rgba(255,255,255,0.06)}
+    #rotateOverlay .hint{opacity:0.9;margin-top:8px;font-size:14px}
     /* ===== Mobile UI ===== */
     #mobileUI{display:none;position:fixed;inset:0;pointer-events:none;z-index:30}
     #lookPad{position:fixed;inset:0;pointer-events:auto;touch-action:none}
@@ -206,6 +210,10 @@
   <div id="buyRing"></div>
   <div id="exitWarn">Нужно принести 10 алмазов, чтобы перейти на следующий уровень</div>
   <div id="toastWrap"></div>
+  <div id="rotateOverlay"><div class="box">
+    <div style="font-size:20px; font-weight:700">Поверните устройство</div>
+    <div class="hint">Если экран не повернулся автоматически, поверните устройство вручную в горизонтальную ориентацию.</div>
+  </div></div>
 
   <!-- Мобильный UI -->
   <div id="mobileUI">
@@ -388,6 +396,17 @@ async function loadLibs(){
       sizeMulInput.addEventListener('input', upd); upd();
     }
   },0);
+
+  // Rotate overlay helpers
+  const rotateOverlay = document.getElementById('rotateOverlay');
+  const isLandscape = ()=> window.matchMedia('(orientation: landscape)').matches;
+  function updateRotateOverlay(){
+    if (!isMobile) { rotateOverlay.style.display='none'; return; }
+    const fs = !!document.fullscreenElement;
+    rotateOverlay.style.display = (fs && !isLandscape()) ? 'flex' : 'none';
+  }
+  window.addEventListener('orientationchange', updateRotateOverlay);
+  window.addEventListener('resize', updateRotateOverlay);
 
   const floorMat = new THREE.MeshLambertMaterial({ map: grass });
   const wallMat  = new THREE.MeshLambertMaterial({ map: brick });
@@ -1229,11 +1248,14 @@ async function loadLibs(){
           }catch(e1){
             try{ await screen.orientation.lock('landscape-primary'); }catch(e2){ /* ignore */ }
           }
+          // показать оверлей, если всё ещё портрет
+          try{ updateRotateOverlay(); }catch{}
         }
       }else{
         await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
         // по выходу можно попробовать снять лок (не критично)
         try{ screen.orientation?.unlock?.(); }catch{/* ignore */}
+        try{ updateRotateOverlay(); }catch{}
       }
     }catch(err){ console.warn(err); showToast('Не удалось переключить полноэкранный режим', 'err'); }
   }
