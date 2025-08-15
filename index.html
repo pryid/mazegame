@@ -1216,14 +1216,24 @@ async function loadLibs(){
   }, {passive:false});
   btnMenu.addEventListener('touchstart',(e)=>{ e.preventDefault(); goToMainMenu(); }, {passive:false});
 
-  // Полноэкранный режим
+  // Полноэкранный режим + автоповорот в landscape на мобильных
   async function toggleFullscreen(){
     try{
       if (!document.fullscreenElement){
         const el=document.documentElement;
         await (el.requestFullscreen?.() || el.webkitRequestFullscreen?.call(el));
+        // попытка залочить ориентацию экрана в landscape на мобильных
+        if (isMobile && screen?.orientation?.lock){
+          try{
+            await screen.orientation.lock('landscape');
+          }catch(e1){
+            try{ await screen.orientation.lock('landscape-primary'); }catch(e2){ /* ignore */ }
+          }
+        }
       }else{
         await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+        // по выходу можно попробовать снять лок (не критично)
+        try{ screen.orientation?.unlock?.(); }catch{/* ignore */}
       }
     }catch(err){ console.warn(err); showToast('Не удалось переключить полноэкранный режим', 'err'); }
   }
