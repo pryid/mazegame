@@ -50,8 +50,8 @@
       display:none;z-index:25
     }
     #buyRing:after{
-      content:"Покупка прыжка (10)"; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-      color:#fff; font:12px/1.1 system-ui,Segoe UI,Roboto,Arial,sans-serif; text-align:center; width:76px
+      content:"Покупка прыжка"; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      color:#fff; font:12px/1.1 system-ui,Segoe UI,Roboto,Arial,sans-serif; text-align:center; width:90px
     }
     #exitWarn{
       position:fixed;left:50%;bottom:120px;transform:translateX(-50%);
@@ -161,6 +161,13 @@
           <path d="M3 1v16M4 2h8l-2.5 3L12 8H4z" fill="currentColor"/>
         </svg>
         <span id="levelsCleared">0</span>
+      </div>
+      <!-- mice caught -->
+      <div class="pill" title="Поймано мышей">
+        <svg class="ico" viewBox="0 0 24 24" style="fill:#ffcc66">
+          <path d="M12 3c-3.5 0-6 2.3-6 5.5 0 2.2 1.4 4 3.4 4.9-.1.4-.2.8-.2 1.2 0 2.2 1.8 4 4 4 1.9 0 3.4-1.3 3.9-3.1 1.8-.7 2.9-2.2 2.9-4 0-3.2-2.5-5.5-6-5.5zm-5 2c.8 0 1.5.7 1.5 1.5S7.8 8 7 8s-1.5-.7-1.5-1.5S6.2 5 7 5zm10 0c.8 0 1.5.7 1.5 1.5S17.8 8 17 8s-1.5-.7-1.5-1.5S16.2 5 17 5z"/>
+        </svg>
+        <span id="miceCaught">0</span>
       </div>
 
       <div id="perks">
@@ -288,9 +295,12 @@ async function loadLibs(){
   const isMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Windows Phone/i.test(navigator.userAgent)
                     || (('ontouchstart' in window) && window.matchMedia('(max-width: 900px)').matches);
 
-  const cellSize = 5, mazeSize = 15, toWin = 10;
+  const SCALE = 5;
+  const cellSize = 5; // keep cell size; scale maze dimensions instead
+  const mazeSize = 15 * SCALE;
+  const toWin = 10 * SCALE;
   const playerRadius = cellSize*0.35, WALL_HEIGHT = cellSize;
-  const DIAMOND_COUNT = 15, SUPER_CHANCE = 0.12;
+  const DIAMOND_COUNT = 15 * SCALE, SUPER_CHANCE = 0.12;
 
   function LCG(seedInit=1){
     let s = (seedInit>>>0)||1; const a = 1664525>>>0, c = 1013904223>>>0;
@@ -652,7 +662,8 @@ async function loadLibs(){
   let gameMode = 'classic';
   let jumpUnlockedClassic = false;
   // Mice (mob) state
-  const mice=[]; const MOUSE_SPEED=8; const MOUSE_HALF_H=0.5;
+  const mice=[]; const MOUSE_SPEED=8*SCALE; const MOUSE_HALF_H=0.5;
+  let miceCaught=0;
   let mouseModel=null; let objLoader=null; let ratTexture=null;
   async function ensureMouseModel(){
     if (mouseModel) return mouseModel;
@@ -679,27 +690,35 @@ async function loadLibs(){
     }
   }
 
+  const MAP_COST = 20 * SCALE;
+  const JUMP_COST = 10 * SCALE;
+
   function updateHUD(){
     // counts are updated via textContent, here update perk states/visibility
     perkMap.classList.toggle('on', mapUnlocked);
-    perkMap.classList.toggle('can', !mapUnlocked && totalDiamonds>=20);
+    perkMap.classList.toggle('can', !mapUnlocked && totalDiamonds>=MAP_COST);
+    // update price labels
+    const priceMap = perkMap.querySelector('.price'); if (priceMap) priceMap.textContent = String(MAP_COST);
+    const priceJump = perkJump.querySelector('.price'); if (priceJump) priceJump.textContent = String(JUMP_COST);
     // jump icon only in Classic
     if (gameMode==='classic'){
       perkJump.style.display='flex';
       perkJump.classList.toggle('on', jumpUnlockedClassic);
-      perkJump.classList.toggle('can', !jumpUnlockedClassic && totalDiamonds>=10);
+      perkJump.classList.toggle('can', !jumpUnlockedClassic && totalDiamonds>=JUMP_COST);
     }else{
       perkJump.style.display='none';
     }
+    // mice caught
+    const miceUI = document.getElementById('miceCaught'); if (miceUI) miceUI.textContent = String(miceCaught);
   }
 
   function toggleMap(){
     if (!mapUnlocked){
-      if (totalDiamonds >= 20){
-        totalDiamonds -= 20; totalUI.textContent = totalDiamonds;
+      if (totalDiamonds >= MAP_COST){
+        totalDiamonds -= MAP_COST; totalUI.textContent = totalDiamonds;
         mapUnlocked = true; updateHUD();
         mapCanvas.style.display='block'; buildMapScene(); return;
-      }else{ showToast('Нужно 20 алмазов для карты', 'warn'); return; }
+      }else{ showToast(`Нужно ${MAP_COST} алмазов для карты`, 'warn'); return; }
     }
     if (mapCanvas.style.display==='none'){ mapCanvas.style.display='block'; buildMapScene(); }
     else mapCanvas.style.display='none';
@@ -866,7 +885,7 @@ async function loadLibs(){
   let fps = 0, _fpsAccum = 0, _fpsFrames = 0;
 
   let velY = 0;
-  const GRAV = -25, JUMP_V = 8, JUMP_V_PAD = 16, FLY_V = 10;
+  const GRAV = -25, JUMP_V = Math.round(8*Math.sqrt(SCALE)), JUMP_V_PAD = Math.round(16*Math.sqrt(SCALE)), FLY_V = Math.round(10*Math.sqrt(SCALE));
   let onGround = true, isFlying = false, lastSpaceTime = 0;
   let buyHold=false, buyStart=0;
   let deathCooldownUntil = 0;
@@ -1013,7 +1032,7 @@ async function loadLibs(){
     }
     group.position.set((p.x+0.5)*cellSize, MOUSE_HALF_H, (p.y+0.5)*cellSize);
     scene.add(group);
-    mice.push({ group, target:null, lastCell:{x:p.x,y:p.y}, velY:0, onGround:true });
+    mice.push({ group, target:null, lastCell:{x:p.x,y:p.y}, velY:0, onGround:true, onWall:false, loot:0 });
     showToast('Появилась мышь! Загоните её в тупик', 'success');
   }
   function updateMice(dt){
@@ -1023,8 +1042,10 @@ async function loadLibs(){
       const m = mice[i];
       const dx = pos.x - m.group.position.x, dz = pos.z - m.group.position.z;
       if ((dx*dx + dz*dz) < 2.56){
-        totalDiamonds += 50; totalUI.textContent = totalDiamonds; updateHUD();
-        scene.remove(m.group); mice.splice(i,1); showToast('+50 за мышь', 'success');
+        const reward = 50 + m.loot;
+        diamondCount += reward; totalDiamonds += reward; miceCaught++;
+        diamondUI.textContent=diamondCount; totalUI.textContent=totalDiamonds; updateHUD();
+        scene.remove(m.group); mice.splice(i,1); showToast(`+${reward} за мышь`, 'success');
         continue;
       }
       const mc = { x: Math.floor(m.group.position.x / cellSize), y: Math.floor(m.group.position.z / cellSize) };
@@ -1035,7 +1056,7 @@ async function loadLibs(){
         let best=null, bestDist=-1;
         for (const [dx,dy] of dirs){
           const nx=mc.x+dx, ny=mc.y+dy;
-          if (!isPassableCell(nx,ny)) continue;
+          if (!(m.onWall ? true : isPassableCell(nx,ny))) continue;
           if (m.lastCell && nx===m.lastCell.x && ny===m.lastCell.y) continue;
           const cx=(nx+0.5)*cellSize, cz=(ny+0.5)*cellSize;
           const d2 = (cx-pos.x)*(cx-pos.x) + (cz-pos.z)*(cz-pos.z);
@@ -1053,17 +1074,29 @@ async function loadLibs(){
         m.group.position.z += (dirz/len)*step;
         m.group.rotation.y = Math.atan2(dirx, dirz);
       }
-      // vertical physics & pad jump
-      const gH = groundHeightAtWorld(m.group.position.x, m.group.position.z);
-      const groundY = gH + MOUSE_HALF_H;
+      // vertical physics & pad/wall logic
+      const gx = Math.floor(m.group.position.x/cellSize), gz = Math.floor(m.group.position.z/cellSize);
+      const cellH = blockHeightAt(gx,gz);
+      const groundY = (m.onWall && cellH>0) ? (cellH + MOUSE_HALF_H) : (groundHeightAtWorld(m.group.position.x, m.group.position.z) + MOUSE_HALF_H);
       m.velY += GRAV * dt;
       m.group.position.y += m.velY * dt;
       if (m.group.position.y <= groundY){
         m.group.position.y = groundY; m.velY = 0; m.onGround = true;
-        const gx = Math.floor(m.group.position.x/cellSize), gz = Math.floor(m.group.position.z/cellSize);
-        if ((obstacles?.[gz]?.[gx]||0)===4){ m.velY = JUMP_V_PAD; m.onGround=false; }
+        if ((obstacles?.[gz]?.[gx]||0)===4){ m.velY = JUMP_V_PAD; m.onGround=false; m.onWall=true; }
+        if (cellH<=0 && m.onWall){ m.onWall=false; }
       }
       if (m.group.position.y < MOUSE_HALF_H) m.group.position.y = MOUSE_HALF_H;
+
+      // Mice pick up diamonds
+      if (diamonds.length){
+        diamonds = diamonds.filter(d=>{
+          if (m.group.position.distanceToSquared(d.position) < 2.56){
+            const val = (d.userData.type==='S') ? 20 : 1;
+            m.loot += val; scene.remove(d); return false;
+          }
+          return true;
+        });
+      }
     }
   }
 
@@ -1097,10 +1130,10 @@ async function loadLibs(){
   function updateBuyRing(){
     if (!buyHold){ buyRing.style.display='none'; return; }
     if (gameMode!=='classic' || jumpUnlockedClassic){ buyRing.style.display='none'; buyHold=false; return; }
-    const need=10;
+    const need=JUMP_COST;
     if (totalDiamonds < need){
       buyRing.style.display='none'; buyHold=false;
-      showToast('Нужно 10 алмазов для прыжков', 'warn'); return;
+      showToast(`Нужно ${need} алмазов для прыжков`, 'warn'); return;
     }
     const prog = Math.min(1, (performance.now()-buyStart)/5000);
     const deg = Math.floor(prog*360);
@@ -1243,7 +1276,7 @@ async function loadLibs(){
       right.copy(forward).cross(up).normalize();
 
       const len = Math.hypot(ax,az) || 1;
-      const speed = 9 * dt / len;
+      const speed = 9 * SCALE * dt / len;
       const dx = (right.x*ax + forward.x*az) * speed;
       const dz = (right.z*ax + forward.z*az) * speed;
       moveWithCollisions(dx, dz);
