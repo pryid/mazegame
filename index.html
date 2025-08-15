@@ -270,15 +270,16 @@ async function loadLibs(){
   return {
     THREE: await import('./vendor/three/three.module.js'),
     PLC: (await import('./vendor/three/PointerLockControls.js')).PointerLockControls,
-    GLTFLoader: (await import('./vendor/three/GLTFLoader.js')).GLTFLoader
+    GLTFLoader: (await import('./vendor/three/GLTFLoader.js')).GLTFLoader,
+    OBJLoader: (await import('./vendor/three/OBJLoader.js')).OBJLoader
   };
 }
 
 (async ()=>{
-  let THREE, PointerLockControls, GLTFLoader;
+  let THREE, PointerLockControls, GLTFLoader, OBJLoader;
   try{
     const libs = await loadLibs();
-    THREE = libs.THREE; PointerLockControls = libs.PLC; GLTFLoader = libs.GLTFLoader;
+    THREE = libs.THREE; PointerLockControls = libs.PLC; GLTFLoader = libs.GLTFLoader; OBJLoader = libs.OBJLoader;
   }catch(e){
     console.error(e);
     showToast('Не удалось загрузить three.js', 'err', 3000);
@@ -653,7 +654,7 @@ async function loadLibs(){
   let jumpUnlockedClassic = false;
   // Mice (mob) state
   const mice=[]; const MOUSE_SPEED=8; const MOUSE_HALF_H=0.5;
-  let mouseModel=null; let mouseLoader=null;
+  let mouseModel=null; let mouseLoader=null; let objLoader=null; let ratTexture=null;
   async function ensureMouseModel(){
     if (mouseModel) return mouseModel;
     try{
@@ -662,8 +663,28 @@ async function loadLibs(){
       mouseModel = gltf.scene;
       return mouseModel;
     }catch(err){
-      console.warn('Mouse GLB not found, using procedural model');
-      mouseModel = null; return null;
+      console.warn('GLB not found, try OBJ');
+      try{
+        if (!objLoader) objLoader = new OBJLoader();
+        if (!ratTexture){
+          const tl = new THREE.TextureLoader();
+          ratTexture = tl.load('assets/models/rat.jpg');
+          if (THREE.SRGBColorSpace) ratTexture.colorSpace = THREE.SRGBColorSpace;
+        }
+        const obj = await objLoader.loadAsync('assets/models/rat.obj');
+        obj.traverse(n=>{
+          if (n.isMesh){
+            n.material = new THREE.MeshStandardMaterial({ map: ratTexture, roughness:0.85, metalness:0.0 });
+          }
+        });
+        // normalize scale roughly to player size
+        obj.scale.set(0.015,0.015,0.015);
+        mouseModel = obj;
+        return mouseModel;
+      }catch(e2){
+        console.warn('OBJ not found, using procedural model');
+        mouseModel = null; return null;
+      }
     }
   }
 
