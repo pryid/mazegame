@@ -133,9 +133,12 @@
         <button id="btnClassic" class="btn">Новый забег — Классический</button>
         <button id="btnBiomes" class="btn">Новый забег — Биомы</button>
       </div>
+      <div class="menuRow">
+        <input id="sizeMulInput" class="input" type="number" min="1" max="50" value="1" placeholder="Масштаб карты (1-50)" />
+      </div>
       <p style="margin-top:16px;font-size:12px;opacity:.85">
         Управление (ПК): клик по игре — захват мыши; WASD — ходьба; Space — прыжок; двойной Space — полёт; Shift — снижение;
-        M — 3D-карта (1 покупка за 20 на уровень); 0 — отладка (FPS/метрики); Q — качество (LOW/MED/HIGH);
+        M — 3D-карта; 0 — отладка (FPS/метрики); Q — качество (LOW/MED/HIGH); 7 — заспавнить мышь;
         1 — сохранить; 2 — загрузить; 3 — +100; 4 — меню.
         На мобильных: левый стик (ходьба), свайп справа (взгляд), «Прыжок/Снижение», «Карта», «Сохранить», «На весь экран», «Меню».
       </p>
@@ -227,11 +230,12 @@ const buyRing   = document.getElementById('buyRing');
 const exitWarn  = document.getElementById('exitWarn');
 const toastWrap = document.getElementById('toastWrap');
 
-const mainMenu   = document.getElementById('mainMenu');
-const menuInput  = document.getElementById('menuSaveInput');
-const btnContinue= document.getElementById('btnContinue');
-const btnClassic = document.getElementById('btnClassic');
-const btnBiomes  = document.getElementById('btnBiomes');
+  const mainMenu   = document.getElementById('mainMenu');
+  const menuInput  = document.getElementById('menuSaveInput');
+  const btnContinue= document.getElementById('btnContinue');
+  const btnClassic = document.getElementById('btnClassic');
+  const btnBiomes  = document.getElementById('btnBiomes');
+  let sizeMulInput = null;
 
 /* perks icons */
 const perkMap  = document.getElementById('perkMap');
@@ -295,12 +299,16 @@ async function loadLibs(){
   const isMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Windows Phone/i.test(navigator.userAgent)
                     || (('ontouchstart' in window) && window.matchMedia('(max-width: 900px)').matches);
 
-  const SCALE = 5;
-  const cellSize = 5; // keep cell size; scale maze dimensions instead
-  const mazeSize = 15 * SCALE;
-  const toWin = 10 * SCALE;
+  const cellSize = 5;
+  const BASE_MAZE_SIZE = 15;
+  const BASE_TO_WIN = 10;
+  const BASE_DIAMOND_COUNT = 15;
+  let sizeMul = 1;
+  let mazeSize = BASE_MAZE_SIZE;
+  let toWin = BASE_TO_WIN;
   const playerRadius = cellSize*0.35, WALL_HEIGHT = cellSize;
-  const DIAMOND_COUNT = 15 * SCALE, SUPER_CHANCE = 0.12;
+  let DIAMOND_COUNT = BASE_DIAMOND_COUNT;
+  const SUPER_CHANCE = 0.12;
 
   function LCG(seedInit=1){
     let s = (seedInit>>>0)||1; const a = 1664525>>>0, c = 1013904223>>>0;
@@ -452,7 +460,7 @@ async function loadLibs(){
           if (r < pTree) { obstacles[y][x]=1; }
         }
       }
-      // Place up to 2 jump pads (type 4): stepping grants a powerful jump
+      // Place jump pads (type 4): count scales with size multiplier
       let candidates = [];
       for (let y=1;y<H-1;y++){
         for (let x=1;x<W-1;x++){
@@ -464,7 +472,8 @@ async function loadLibs(){
       }
       // Shuffle using rngBiome
       for (let i=candidates.length-1;i>0;i--){ const j=rngBiome.int(i+1); const t=candidates[i]; candidates[i]=candidates[j]; candidates[j]=t; }
-      const padCount = Math.min(2, candidates.length);
+      const padTarget = Math.max(2, Math.round(2 * sizeMul));
+      const padCount = Math.min(padTarget, candidates.length);
       for (let i=0;i<padCount;i++){
         const c = candidates[i]; obstacles[c.y][c.x] = 4;
       }
@@ -564,7 +573,7 @@ async function loadLibs(){
   const mapLight = new THREE.DirectionalLight(0xffffff, 0.9); mapLight.position.set(100,200,100);
   mapScene.add(new THREE.AmbientLight(0xffffff, 0.6)); mapScene.add(mapLight);
 
-  let mapMazeGroup=null, mapDiamonds=[], mapPlayer=null, mapExit=null, mapMice=[];
+  let mapMazeGroup=null, mapDiamonds=[], mapPlayer=null, mapExit=null, mapMice=[], mapPads=[];
   let lastMapMask = null;
   function buildMapScene(){
     if (mapMazeGroup) mapScene.remove(mapMazeGroup);
@@ -615,8 +624,23 @@ async function loadLibs(){
     // reset mice markers
     for (const mk of mapMice) mapScene.remove(mk); mapMice=[];
     for (const m of mice){
-      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xb0b0b0 }));
+      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xffaa33 }));
       mk.position.copy(m.group.position); mapScene.add(mk); mapMice.push(mk);
+    }
+    // build pad markers
+    for (const pk of mapPads) mapScene.remove(pk); mapPads=[];
+    if (obstacles){
+      const W = maze[0].length, H = maze.length;
+      const mat = new THREE.MeshBasicMaterial({ color:0x00d0ff });
+      for (let y=0;y<H;y++){
+        for (let x=0;x<W;x++){
+          if ((obstacles[y]?.[x]||0)===4){
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(1.8, 0.08, 6, 20), mat);
+            ring.position.set((x+0.5)*cellSize, 0.6, (y+0.5)*cellSize);
+            ring.rotation.x = Math.PI/2; mapScene.add(ring); mapPads.push(ring);
+          }
+        }
+      }
     }
     // mice markers added above
 
@@ -651,7 +675,7 @@ async function loadLibs(){
     // update mice markers
     for (const mk of mapMice) mapScene.remove(mk); mapMice=[];
     for (const m of mice){
-      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xb0b0b0 }));
+      const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xffaa33 }));
       mk.position.copy(m.group.position); mapScene.add(mk); mapMice.push(mk);
     }
     mapRenderer.render(mapScene, mapCam);
@@ -662,7 +686,7 @@ async function loadLibs(){
   let gameMode = 'classic';
   let jumpUnlockedClassic = false;
   // Mice (mob) state
-  const mice=[]; const MOUSE_SPEED=8*SCALE; const MOUSE_HALF_H=0.5;
+  const mice=[]; const MOUSE_SPEED=8; const MOUSE_HALF_H=0.5;
   let miceCaught=0;
   let mouseModel=null; let objLoader=null; let ratTexture=null;
   async function ensureMouseModel(){
@@ -690,11 +714,10 @@ async function loadLibs(){
     }
   }
 
-  const MAP_COST = 20 * SCALE;
-  const JUMP_COST = 10 * SCALE;
-
   function updateHUD(){
     // counts are updated via textContent, here update perk states/visibility
+    const MAP_COST = 20 * sizeMul;
+    const JUMP_COST = 10 * sizeMul;
     perkMap.classList.toggle('on', mapUnlocked);
     perkMap.classList.toggle('can', !mapUnlocked && totalDiamonds>=MAP_COST);
     // update price labels
@@ -713,6 +736,7 @@ async function loadLibs(){
   }
 
   function toggleMap(){
+    const MAP_COST = 20 * sizeMul;
     if (!mapUnlocked){
       if (totalDiamonds >= MAP_COST){
         totalDiamonds -= MAP_COST; totalUI.textContent = totalDiamonds;
@@ -763,104 +787,84 @@ async function loadLibs(){
     return mask;
   }
   function encodeSave(){
-    const v = 9n;
     const {gx,gz,fx,fz} = getGridPos();
     const yawF   = ((camera.rotation.y % (Math.PI*2)) + Math.PI*2)%(Math.PI*2);
-    const yaw5   = BigInt(clamp(Math.round(yawF/(Math.PI*2)*31),0,31));
+    const yaw5   = clamp(Math.round(yawF/(Math.PI*2)*31),0,31);
     const pitchL = Math.PI*0.49;
     const pitchF = clamp(camera.rotation.x, -pitchL, pitchL);
-    const pitch5 = BigInt(clamp(Math.round((pitchF + pitchL)/(2*pitchL) * 31),0,31));
+    const pitch5 = clamp(Math.round((pitchF + pitchL)/(2*pitchL) * 31),0,31);
     const posY   = clamp(controls.getObject().position.y, 0, 31);
-    const y5     = BigInt(Math.round(posY));
-    const fly    = isFlying ? 1n : 0n;
+    const y5     = Math.round(posY);
+    const fly    = isFlying ? 1 : 0;
 
-    const total = BigInt(clamp(totalDiamonds,0,511));
-    const levels= BigInt(clamp(levelsCleared,0,31));
-    const map   = mapUnlocked ? 1n : 0n;
-    const jump  = (gameMode==='classic' && jumpUnlockedClassic) ? 1n : 0n;
-    const modeBit = gameMode==='biomes' ? 1n : 0n;
-    const mask  = buildMaskBigInt();
+    const total = clamp(totalDiamonds,0,9999999);
+    const levels= clamp(levelsCleared,0,9999);
+    const map   = mapUnlocked ? 1 : 0;
+    const jump  = (gameMode==='classic' && jumpUnlockedClassic) ? 1 : 0;
+    const modeC = (gameMode==='biomes') ? 'B' : 'C';
+    const mask  = buildMaskBigInt().toString(); // decimal string
 
-    let code=0n;
-    code=(code<<4n)|v;
-    code=(code<<11n)|BigInt(mazeSeed & 0x07FF);
-    code=(code<<11n)|BigInt(diamondsSeed & 0x07FF);
-    code=(code<<11n)|BigInt(biomeSeed & 0x07FF);
-    code=(code<<1n)|modeBit;
-    code=(code<<4n)|BigInt(gx & 0xF);
-    code=(code<<4n)|BigInt(gz & 0xF);
-    code=(code<<4n)|BigInt(fx & 0xF);
-    code=(code<<4n)|BigInt(fz & 0xF);
-    code=(code<<5n)|y5;
-    code=(code<<1n)|fly;
-    code=(code<<5n)|yaw5;
-    code=(code<<5n)|pitch5;
-    code=(code<<9n)|total;
-    code=(code<<5n)|levels;
-    code=(code<<1n)|map;
-    code=(code<<1n)|jump;
-    code=(code<<15n)|mask;
-
-    let raw = base36FromBigInt(code);
-    // mice suffix: 'M' + COUNT + pairs of GX GZ (all base36 uppercase)
-    const mx = mice.length;
-    if (mx>0){
-      let suf = 'M' + mx.toString(36).toUpperCase();
-      for (let i=0;i<mx;i++){
-        const g = mice[i];
-        const gx = Math.max(0, Math.min(15, Math.floor(g.group.position.x / cellSize)));
-        const gz = Math.max(0, Math.min(15, Math.floor(g.group.position.z / cellSize)));
-        suf += gx.toString(36).toUpperCase() + gz.toString(36).toUpperCase();
+    let parts = [];
+    parts.push('S'+String(sizeMul));
+    parts.push('G'+modeC);
+    parts.push('MS'+String(mazeSeed));
+    parts.push('DS'+String(diamondsSeed));
+    parts.push('BS'+String(biomeSeed));
+    parts.push('PX'+String(gx),'PZ'+String(gz),'FX'+String(fx),'FZ'+String(fz),'PY'+String(y5),'FL'+String(fly),'YW'+String(yaw5),'PT'+String(pitch5));
+    parts.push('TD'+String(total),'LV'+String(levels),'MP'+String(map),'JP'+String(jump));
+    parts.push('DM'+mask);
+    if (mice.length){
+      parts.push('MI'+String(mice.length));
+      for (const m of mice){
+        const mx = Math.max(0, Math.floor(m.group.position.x / cellSize));
+        const mz = Math.max(0, Math.floor(m.group.position.z / cellSize));
+        parts.push('MX'+String(mx),'MZ'+String(mz));
       }
-      raw = raw + suf;
     }
-    // insert dashes for readability (every 5 chars)
-    let out=''; for (let i=0;i<raw.length;i++){ out += raw[i]; if ((i%5)===4 && i<raw.length-1) out+='-'; }
-    return out;
+    const raw = parts.join('');
+    // insert dashes for readability (every 6 chars)
+    let out=''; for (let i=0;i<raw.length;i++){ out += raw[i]; if ((i%6)===5 && i<raw.length-1) out+='-'; }
+    return out.toUpperCase();
   }
   function decodeSave(str){
     const flat = String(str).replace(/-/g,'');
-    const mIdx = flat.indexOf('M');
-    const coreStr = mIdx===-1 ? flat : flat.slice(0, mIdx);
-    const suffix = mIdx===-1 ? '' : flat.slice(mIdx);
-    const x0 = bigIntFromBase36(coreStr); let x=x0;
-    const mask   = x & ((1n<<15n)-1n);  x >>= 15n;
-    const jump   = x & 1n;              x >>= 1n;
-    const map    = x & 1n;              x >>= 1n;
-    const levels = x & ((1n<<5n)-1n);   x >>= 5n;
-    const total  = x & ((1n<<9n)-1n);   x >>= 9n;
-    const pitch5 = x & ((1n<<5n)-1n);   x >>= 5n;
-    const yaw5   = x & ((1n<<5n)-1n);   x >>= 5n;
-    const fly    = x & 1n;              x >>= 1n;
-    const y5     = x & ((1n<<5n)-1n);   x >>= 5n;
-    const fz     = x & ((1n<<4n)-1n);   x >>= 4n;
-    const fx     = x & ((1n<<4n)-1n);   x >>= 4n;
-    const gz     = x & ((1n<<4n)-1n);   x >>= 4n;
-    const gx     = x & ((1n<<4n)-1n);   x >>= 4n;
-    const mode   = x & 1n;              x >>= 1n;
-    const bseed  = x & ((1n<<11n)-1n);  x >>= 11n;
-    const dseed  = x & ((1n<<11n)-1n);  x >>= 11n;
-    const mseed  = x & ((1n<<11n)-1n);  x >>= 11n;
-    const v      = x & ((1n<<4n)-1n);
-    if (Number(v)!==9) throw new Error('Неподдерживаемая версия сейва (v9)');
-    // parse mice from suffix if present
-    let miceArr = [];
-    if (suffix && suffix[0]==='M'){
-      const cnt = parseInt(suffix[1], 36) || 0;
-      for (let i=0;i<cnt;i++){
-        const gxCh = suffix[2 + i*2];
-        const gzCh = suffix[2 + i*2 + 1];
-        if (!gxCh || !gzCh) break;
-        const gxv = parseInt(gxCh, 36); const gzv = parseInt(gzCh, 36);
-        if (isFinite(gxv) && isFinite(gzv)) miceArr.push({gx:gxv&0xF, gz:gzv&0xF});
+    let i=0; const takeNum=()=>{ let s=''; while(i<flat.length && /[0-9]/.test(flat[i])) s+=flat[i++]; return s; };
+    let d={ size:1, mode:false, mseed:0,dseed:0,bseed:0, gx:0,gz:0,fx:0,fz:0, y:2, fly:false, yaw:0,pitch:0, total:0, levels:0, map:false, jump:false, mask:0n, mice:[] };
+    while (i<flat.length){
+      // read tag letters
+      let tag=''; while (i<flat.length && /[A-Z]/.test(flat[i])) tag+=flat[i++];
+      if (!tag) break;
+      if (tag==='S'){ d.size = parseInt(takeNum()||'1',10); }
+      else if (tag==='G'){ const c=flat[i++]||'C'; d.mode = (c==='B'); }
+      else if (tag==='MS'){ d.mseed=parseInt(takeNum()||'0',10); }
+      else if (tag==='DS'){ d.dseed=parseInt(takeNum()||'0',10); }
+      else if (tag==='BS'){ d.bseed=parseInt(takeNum()||'0',10); }
+      else if (tag==='PX'){ d.gx=parseInt(takeNum()||'0',10); }
+      else if (tag==='PZ'){ d.gz=parseInt(takeNum()||'0',10); }
+      else if (tag==='FX'){ d.fx=parseInt(takeNum()||'0',10); }
+      else if (tag==='FZ'){ d.fz=parseInt(takeNum()||'0',10); }
+      else if (tag==='PY'){ d.y=parseInt(takeNum()||'2',10); }
+      else if (tag==='FL'){ d.fly=(parseInt(takeNum()||'0',10)===1); }
+      else if (tag==='YW'){ d.yaw=parseInt(takeNum()||'0',10); }
+      else if (tag==='PT'){ d.pitch=parseInt(takeNum()||'0',10); }
+      else if (tag==='TD'){ d.total=parseInt(takeNum()||'0',10); }
+      else if (tag==='LV'){ d.levels=parseInt(takeNum()||'0',10); }
+      else if (tag==='MP'){ d.map=(parseInt(takeNum()||'0',10)===1); }
+      else if (tag==='JP'){ d.jump=(parseInt(takeNum()||'0',10)===1); }
+      else if (tag==='DM'){ const s=takeNum()||'0'; d.mask=BigInt(s); }
+      else if (tag==='MI'){
+        const cnt=parseInt(takeNum()||'0',10);
+        for (let k=0;k<cnt;k++){
+          if (flat.slice(i,i+2)!=='MX') break; i+=2; const mx=parseInt(takeNum()||'0',10);
+          if (flat.slice(i,i+2)!=='MZ') break; i+=2; const mz=parseInt(takeNum()||'0',10);
+          d.mice.push({gx:mx,gz:mz});
+        }
+      } else {
+        // unknown tag: stop
+        break;
       }
     }
-    return {
-      mseed:Number(mseed), dseed:Number(dseed), bseed:Number(bseed),
-      mode:Boolean(mode), gx:Number(gx), gz:Number(gz), fx:Number(fx), fz:Number(fz),
-      y:Number(y5), fly:(fly===1n), yaw:Number(yaw5), pitch:Number(pitch5),
-      total:Number(total), levels:Number(levels), map: (map===1n), jump:(jump===1n), mask, mice:miceArr
-    };
+    return d;
   }
   function isValidSave(str){
     try{
@@ -885,7 +889,7 @@ async function loadLibs(){
   let fps = 0, _fpsAccum = 0, _fpsFrames = 0;
 
   let velY = 0;
-  const GRAV = -25, JUMP_V = Math.round(8*Math.sqrt(SCALE)), JUMP_V_PAD = Math.round(16*Math.sqrt(SCALE)), FLY_V = Math.round(10*Math.sqrt(SCALE));
+  const GRAV = -25, JUMP_V = 8, JUMP_V_PAD = 16, FLY_V = 10;
   let onGround = true, isFlying = false, lastSpaceTime = 0;
   let buyHold=false, buyStart=0;
   let deathCooldownUntil = 0;
@@ -1128,6 +1132,7 @@ async function loadLibs(){
   }
 
   function updateBuyRing(){
+    const JUMP_COST = 10 * sizeMul;
     if (!buyHold){ buyRing.style.display='none'; return; }
     if (gameMode!=='classic' || jumpUnlockedClassic){ buyRing.style.display='none'; buyHold=false; return; }
     const need=JUMP_COST;
@@ -1276,7 +1281,7 @@ async function loadLibs(){
       right.copy(forward).cross(up).normalize();
 
       const len = Math.hypot(ax,az) || 1;
-      const speed = 9 * SCALE * dt / len;
+      const speed = 9 * dt / len;
       const dx = (right.x*ax + forward.x*az) * speed;
       const dz = (right.z*ax + forward.z*az) * speed;
       moveWithCollisions(dx, dz);
@@ -1380,6 +1385,11 @@ async function loadLibs(){
     mapUnlocked = false;
     if (gameMode==='classic') jumpUnlockedClassic=false;
 
+    // apply scaling
+    mazeSize = BASE_MAZE_SIZE * sizeMul;
+    toWin = BASE_TO_WIN * sizeMul;
+    DIAMOND_COUNT = BASE_DIAMOND_COUNT; // keep constant for saves compatibility
+
     maze = generateMaze(mazeSize, mazeSize);
     buildMazeMesh();
     generateObstaclesIfNeeded();
@@ -1416,6 +1426,11 @@ async function loadLibs(){
 
       gameMode = d.mode ? 'biomes' : 'classic';
       reseedMaze(d.mseed); reseedDiam(d.dseed); reseedBiome(d.bseed);
+      // apply size before generating
+      sizeMul = d.size || 1;
+      mazeSize = BASE_MAZE_SIZE * sizeMul;
+      toWin = BASE_TO_WIN * sizeMul;
+      DIAMOND_COUNT = BASE_DIAMOND_COUNT;
 
       maze = generateMaze(mazeSize, mazeSize);
       buildMazeMesh();
@@ -1495,7 +1510,11 @@ async function loadLibs(){
 
   function startNew(mode){
     gameMode = mode;
-    totalDiamonds=0; diamondCount=0; levelsCleared=0; mapUnlocked=false;
+    // read size multiplier from menu
+    sizeMulInput = sizeMulInput || document.getElementById('sizeMulInput');
+    const val = parseInt((sizeMulInput?.value||'1'),10);
+    sizeMul = isFinite(val)?Math.max(1, Math.min(50, val)):1;
+    totalDiamonds=0; diamondCount=0; levelsCleared=0; mapUnlocked=false; miceCaught=0;
     jumpUnlockedClassic = false;
     resetRun();
     mainMenu.style.display='none';
