@@ -607,11 +607,7 @@ async function loadLibs(){
       const mk = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xb0b0b0 }));
       mk.position.copy(m.group.position); mapScene.add(mk); mapMice.push(mk);
     }
-    // Mouse marker (optional)
-    if (mouseActive && mouse){
-      const m = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), new THREE.MeshBasicMaterial({ color:0xaaaaaa }));
-      m.position.copy(mouse.position); mapScene.add(m); mapDiamonds.push(m);
-    }
+    // mice markers added above
 
     const centerX = (W*cellSize)/2, centerZ = (H*cellSize)/2;
     const maxSide = Math.max(W*cellSize, H*cellSize);
