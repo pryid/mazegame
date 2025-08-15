@@ -819,6 +819,8 @@ async function loadLibs(){
     return collected;
   }
   function maskFromCollectedList(list){ let mask=0n; for(const i of list){ mask |= (1n<<BigInt(i)); } return mask; }
+  // Backward-compat helper for existing code paths (map refresh)
+  function buildMaskBigInt(){ return maskFromCollectedList(buildCollectedList()); }
   function encodeSave(){
     const p=controls.getObject().position;
     const save = {
