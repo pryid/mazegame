@@ -1354,6 +1354,12 @@ async function loadLibs(){
     mapUnlocked = false;
     if (gameMode==='classic') jumpUnlockedClassic=false;
 
+    // clear mice from previous map
+    if (mice && mice.length){
+      for (const m of mice){ try{ scene.remove(m.group); }catch{} }
+      mice.length = 0;
+    }
+
     // apply scaling
     mazeSize = BASE_MAZE_SIZE * sizeMul;
     toWin = BASE_TO_WIN * sizeMul;
