@@ -133,8 +133,18 @@
         <button id="btnClassic" class="btn">Новый забег — Классический</button>
         <button id="btnBiomes" class="btn">Новый забег — Биомы</button>
       </div>
-      <div class="menuRow">
-        <input id="sizeMulInput" class="input" type="number" min="1" max="50" value="1" placeholder="Масштаб карты (1-50)" />
+      <div class="menuRow" style="align-items:center">
+        <label for="sizeMulInput" style="min-width:160px">Масштаб карты: ×<span id="sizeMulLabel">1</span></label>
+        <input id="sizeMulInput" type="range" min="1" max="50" step="1" value="1" style="flex:1" list="sizeTicks" />
+        <datalist id="sizeTicks">
+          <option value="1"></option>
+          <option value="5"></option>
+          <option value="10"></option>
+          <option value="20"></option>
+          <option value="30"></option>
+          <option value="40"></option>
+          <option value="50"></option>
+        </datalist>
       </div>
       <p style="margin-top:16px;font-size:12px;opacity:.85">
         Управление (ПК): клик по игре — захват мыши; WASD — ходьба; Space — прыжок; двойной Space — полёт; Shift — снижение;
@@ -235,7 +245,7 @@ const toastWrap = document.getElementById('toastWrap');
   const btnContinue= document.getElementById('btnContinue');
   const btnClassic = document.getElementById('btnClassic');
   const btnBiomes  = document.getElementById('btnBiomes');
-  let sizeMulInput = null;
+  let sizeMulInput = null; let sizeMulLabel = null;
 
 /* perks icons */
 const perkMap  = document.getElementById('perkMap');
@@ -371,6 +381,15 @@ async function loadLibs(){
     if (brick && 'anisotropy' in brick) brick.anisotropy = aniso;
   }
   applyQuality(quality);
+  // init size slider label
+  setTimeout(()=>{
+    sizeMulInput = document.getElementById('sizeMulInput');
+    sizeMulLabel = document.getElementById('sizeMulLabel');
+    if (sizeMulInput && sizeMulLabel){
+      const upd=()=>{ sizeMulLabel.textContent = String(sizeMulInput.value||'1'); };
+      sizeMulInput.addEventListener('input', upd); upd();
+    }
+  },0);
 
   const floorMat = new THREE.MeshLambertMaterial({ map: grass });
   const wallMat  = new THREE.MeshLambertMaterial({ map: brick });
@@ -901,6 +920,7 @@ async function loadLibs(){
   }
 
   window.addEventListener('keydown', e=>{
+    if (mainMenu.style.display !== 'none') return; // ignore gameplay hotkeys in menu
     keys[e.code]=true;
 
     if (e.code==='KeyM') toggleMap();
@@ -950,6 +970,7 @@ async function loadLibs(){
   });
 
   window.addEventListener('keyup', e=>{
+    if (mainMenu.style.display !== 'none') return;
     keys[e.code]=false;
     if (e.code==='Space' && buyHold){ buyHold=false; buyRing.style.display='none'; }
   });
@@ -1388,7 +1409,7 @@ async function loadLibs(){
     // apply scaling
     mazeSize = BASE_MAZE_SIZE * sizeMul;
     toWin = BASE_TO_WIN * sizeMul;
-    DIAMOND_COUNT = BASE_DIAMOND_COUNT; // keep constant for saves compatibility
+    DIAMOND_COUNT = BASE_DIAMOND_COUNT * sizeMul;
 
     maze = generateMaze(mazeSize, mazeSize);
     buildMazeMesh();
@@ -1430,7 +1451,7 @@ async function loadLibs(){
       sizeMul = d.size || 1;
       mazeSize = BASE_MAZE_SIZE * sizeMul;
       toWin = BASE_TO_WIN * sizeMul;
-      DIAMOND_COUNT = BASE_DIAMOND_COUNT;
+      DIAMOND_COUNT = BASE_DIAMOND_COUNT * sizeMul;
 
       maze = generateMaze(mazeSize, mazeSize);
       buildMazeMesh();
