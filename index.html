@@ -160,31 +160,28 @@
     <div id="hud">
       <!-- carried -->
       <div class="pill" title="Алмазы при себе">
-        <span class="ico">💎</span>
-        <span style="margin-right:6px">алмазов</span>
+        <svg class="ico blue" viewBox="0 0 18 18"><polygon points="9,1 17,9 9,17 1,9"/></svg>
         <span id="diamondCount">0</span>
       </div>
       <!-- total -->
       <div class="pill" title="Алмазы всего">
-        <span class="ico">🧊</span>
-        <span style="margin-right:6px">алмазов всего</span>
+        <svg class="ico gray" viewBox="0 0 18 18"><polygon points="9,1 17,9 9,17 1,9"/></svg>
         <span id="totalDiamonds">0</span>
       </div>
       <!-- levels -->
       <div class="pill" title="Пройдено уровней">
-        <span class="ico">🚩</span>
-        <span style="margin-right:6px">пройдено уровней</span>
+        <svg class="ico green" viewBox="0 0 18 18">
+          <path d="M3 1v16M4 2h8l-2.5 3L12 8H4z" fill="currentColor"/>
+        </svg>
         <span id="levelsCleared">0</span>
       </div>
       <!-- mice caught -->
       <div class="pill" title="Поймано мышей">
         <span class="ico" style="font-size:18px;line-height:18px">🐭</span>
-        <span style="margin-right:6px">мыши</span>
         <span id="miceCaught">0</span>
       </div>
 
       <div id="perks">
-        <span style="margin:0 4px 0 2px">🗺карта</span>
         <!-- Map perk -->
         <div id="perkMap" class="perk" title="Карта уровня (20)">
           <svg class="ico" viewBox="0 0 18 18" style="fill:#cfe3ff">
@@ -192,7 +189,6 @@
           </svg>
           <span class="price">20</span>
         </div>
-        <span style="margin:0 4px 0 8px">🔼 прыжки</span>
         <!-- Jump perk (Classic) -->
         <div id="perkJump" class="perk" title="Прыжок (10, только Classic)">
           <svg class="ico" viewBox="0 0 18 18" style="fill:#cfe3ff">
@@ -846,10 +842,7 @@ async function loadLibs(){
     return d;
   }
   function isValidSave(str){
-    try{
-      const d = decodeSave(str);
-      return d && typeof d==='object' && d.size>=1 && d.size<=50 && d.seeds && d.pos && d.progress;
-    }catch{ return false; }
+    try{ decodeSave(str); return true; }catch{ return false; }
   }
 
   /* Управление / геймплей */
@@ -1236,7 +1229,7 @@ async function loadLibs(){
 
   function animate(){
     requestAnimationFrame(animate);
-    const dt = Math.min(0.033, clock.getDelta());
+    const dt = Math.min(0.1, clock.getDelta());
 
     // FPS accumulation
     _fpsFrames++; _fpsAccum += dt;
