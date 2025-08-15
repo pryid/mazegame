@@ -160,30 +160,31 @@
     <div id="hud">
       <!-- carried -->
       <div class="pill" title="Алмазы при себе">
-        <svg class="ico blue" viewBox="0 0 18 18"><polygon points="9,1 17,9 9,17 1,9"/></svg>
+        <span class="ico">💎</span>
+        <span style="margin-right:6px">алмазов</span>
         <span id="diamondCount">0</span>
       </div>
       <!-- total -->
       <div class="pill" title="Алмазы всего">
-        <svg class="ico gray" viewBox="0 0 18 18"><polygon points="9,1 17,9 9,17 1,9"/></svg>
+        <span class="ico">🧊</span>
+        <span style="margin-right:6px">алмазов всего</span>
         <span id="totalDiamonds">0</span>
       </div>
       <!-- levels -->
       <div class="pill" title="Пройдено уровней">
-        <svg class="ico green" viewBox="0 0 18 18">
-          <path d="M3 1v16M4 2h8l-2.5 3L12 8H4z" fill="currentColor"/>
-        </svg>
+        <span class="ico">🚩</span>
+        <span style="margin-right:6px">пройдено уровней</span>
         <span id="levelsCleared">0</span>
       </div>
       <!-- mice caught -->
       <div class="pill" title="Поймано мышей">
-        <svg class="ico" viewBox="0 0 24 24" style="fill:#ffcc66">
-          <path d="M12 3c-3.5 0-6 2.3-6 5.5 0 2.2 1.4 4 3.4 4.9-.1.4-.2.8-.2 1.2 0 2.2 1.8 4 4 4 1.9 0 3.4-1.3 3.9-3.1 1.8-.7 2.9-2.2 2.9-4 0-3.2-2.5-5.5-6-5.5zm-5 2c.8 0 1.5.7 1.5 1.5S7.8 8 7 8s-1.5-.7-1.5-1.5S6.2 5 7 5zm10 0c.8 0 1.5.7 1.5 1.5S17.8 8 17 8s-1.5-.7-1.5-1.5S16.2 5 17 5z"/>
-        </svg>
+        <span class="ico" style="font-size:18px;line-height:18px">🐭</span>
+        <span style="margin-right:6px">мыши</span>
         <span id="miceCaught">0</span>
       </div>
 
       <div id="perks">
+        <span style="margin:0 4px 0 2px">🗺карта</span>
         <!-- Map perk -->
         <div id="perkMap" class="perk" title="Карта уровня (20)">
           <svg class="ico" viewBox="0 0 18 18" style="fill:#cfe3ff">
@@ -191,6 +192,7 @@
           </svg>
           <span class="price">20</span>
         </div>
+        <span style="margin:0 4px 0 8px">🔼 прыжки</span>
         <!-- Jump perk (Classic) -->
         <div id="perkJump" class="perk" title="Прыжок (10, только Classic)">
           <svg class="ico" viewBox="0 0 18 18" style="fill:#cfe3ff">
@@ -788,9 +790,20 @@ async function loadLibs(){
   }
 
   /* Сейвы */
-  function base36FromBigInt(x){ return x.toString(36).toUpperCase(); }
-  function bigIntFromBase36(str){ let x=0n; for (const ch of str.trim().toLowerCase()){
-    const c=ch.charCodeAt(0); let v; if (c>=48&&c<=57) v=BigInt(c-48); else if (c>=97&&c<=122) v=BigInt(c-87); else continue; x=x*36n+v; } return x; }
+  // Base32 (RFC4648) uppercase alphabet: A-Z2-7
+  const B32_ALPH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  function b32encode(bytes){
+    let out=''; let i=0, buffer=0, bitsLeft=0;
+    while(i<bytes.length){ buffer=(buffer<<8)|bytes[i++]; bitsLeft+=8; while(bitsLeft>=5){ bitsLeft-=5; out+=B32_ALPH[(buffer>>bitsLeft)&31]; } }
+    if(bitsLeft>0){ out+=B32_ALPH[(buffer<<(5-bitsLeft))&31]; }
+    return out;
+  }
+  function b32decode(str){
+    const s=str.replace(/-/g,'').replace(/\s+/g,'');
+    let buffer=0,bitsLeft=0, out=[];
+    for(const ch of s){ const v=B32_ALPH.indexOf(ch); if(v<0) continue; buffer=(buffer<<5)|v; bitsLeft+=5; if(bitsLeft>=8){ bitsLeft-=8; out.push((buffer>>bitsLeft)&255); } }
+    return new Uint8Array(out);
+  }
   function clamp(v,min,max){ return v<min?min:v>max?max:v; }
   function getGridPos(){
     const p=controls.getObject().position;
@@ -800,102 +813,40 @@ async function loadLibs(){
     const fz = Math.max(0, Math.min(15, Math.round(((p.z/cellSize)-gz)*15)));
     return { gx, gz, fx, fz };
   }
-  function buildMaskBigInt(){
-    let mask=0n; const aliveIdx=new Set(diamonds.map(d=>d.userData.idx));
-    for (let i=0;i<DIAMOND_COUNT;i++) if (!aliveIdx.has(i)) mask|=(1n<<BigInt(i));
-    return mask;
+  function buildCollectedList(){
+    const collected=[]; const aliveIdx=new Set(diamonds.map(d=>d.userData.idx));
+    for (let i=0;i<diamondsRef.length;i++) if (!aliveIdx.has(i)) collected.push(i);
+    return collected;
   }
+  function maskFromCollectedList(list){ let mask=0n; for(const i of list){ mask |= (1n<<BigInt(i)); } return mask; }
   function encodeSave(){
-    const {gx,gz,fx,fz} = getGridPos();
-    const yawF   = ((camera.rotation.y % (Math.PI*2)) + Math.PI*2)%(Math.PI*2);
-    const yaw5   = clamp(Math.round(yawF/(Math.PI*2)*31),0,31);
-    const pitchL = Math.PI*0.49;
-    const pitchF = clamp(camera.rotation.x, -pitchL, pitchL);
-    const pitch5 = clamp(Math.round((pitchF + pitchL)/(2*pitchL) * 31),0,31);
-    const posY   = clamp(controls.getObject().position.y, 0, 31);
-    const y5     = Math.round(posY);
-    const fly    = isFlying ? 1 : 0;
-
-    const total = clamp(totalDiamonds,0,9999999);
-    const levels= clamp(levelsCleared,0,9999);
-    const map   = mapUnlocked ? 1 : 0;
-    const jump  = (gameMode==='classic' && jumpUnlockedClassic) ? 1 : 0;
-    const modeC = (gameMode==='biomes') ? 'B' : 'C';
-    const mask  = buildMaskBigInt().toString(); // decimal string
-
-    let parts = [];
-    parts.push('S'+String(sizeMul));
-    parts.push('G'+modeC);
-    parts.push('MS'+String(mazeSeed));
-    parts.push('DS'+String(diamondsSeed));
-    parts.push('BS'+String(biomeSeed));
-    parts.push('PX'+String(gx),'PZ'+String(gz),'FX'+String(fx),'FZ'+String(fz),'PY'+String(y5),'FL'+String(fly),'YW'+String(yaw5),'PT'+String(pitch5));
-    parts.push('TD'+String(total),'LV'+String(levels),'MP'+String(map),'JP'+String(jump));
-    parts.push('DM'+mask);
-    if (mice.length){
-      parts.push('MI'+String(mice.length));
-      for (const m of mice){
-        const mx = Math.max(0, Math.floor(m.group.position.x / cellSize));
-        const mz = Math.max(0, Math.floor(m.group.position.z / cellSize));
-        parts.push('MX'+String(mx),'MZ'+String(mz));
-      }
-    }
-    const raw = parts.join('');
-    // insert dashes for readability (every 6 chars)
-    let out=''; for (let i=0;i<raw.length;i++){ out += raw[i]; if ((i%6)===5 && i<raw.length-1) out+='-'; }
-    return out.toUpperCase();
+    const p=controls.getObject().position;
+    const save = {
+      size:sizeMul,
+      mode: gameMode,
+      seeds: { maze:mazeSeed, diam:diamondsSeed, biome:biomeSeed },
+      pos: { x:+p.x.toFixed(3), y:+p.y.toFixed(3), z:+p.z.toFixed(3), yaw:+((camera.rotation.y)%(Math.PI*2)).toFixed(4), pitch:+(camera.rotation.x).toFixed(4), fly:isFlying },
+      progress: { total: totalDiamonds, levels: levelsCleared, map: mapUnlocked, jump: jumpUnlockedClassic, carry: diamondCount },
+      collected: buildCollectedList(),
+      mice: mice.map(m=>({ gx: Math.floor(m.group.position.x/cellSize), gz: Math.floor(m.group.position.z/cellSize) }))
+    };
+    const json = JSON.stringify(save);
+    const bytes = new TextEncoder().encode(json);
+    const b32 = b32encode(bytes).toUpperCase();
+    let out=''; for (let i=0;i<b32.length;i++){ out+=b32[i]; if ((i%8)===7 && i<b32.length-1) out+='-'; }
+    return out;
   }
   function decodeSave(str){
-    const flat = String(str).replace(/-/g,'');
-    let i=0; const takeNum=()=>{ let s=''; while(i<flat.length && /[0-9]/.test(flat[i])) s+=flat[i++]; return s; };
-    let d={ size:1, mode:false, mseed:0,dseed:0,bseed:0, gx:0,gz:0,fx:0,fz:0, y:2, fly:false, yaw:0,pitch:0, total:0, levels:0, map:false, jump:false, mask:0n, mice:[] };
-    while (i<flat.length){
-      // read tag letters
-      let tag=''; while (i<flat.length && /[A-Z]/.test(flat[i])) tag+=flat[i++];
-      if (!tag) break;
-      if (tag==='S'){ d.size = parseInt(takeNum()||'1',10); }
-      else if (tag==='G'){ const c=flat[i++]||'C'; d.mode = (c==='B'); }
-      else if (tag==='MS'){ d.mseed=parseInt(takeNum()||'0',10); }
-      else if (tag==='DS'){ d.dseed=parseInt(takeNum()||'0',10); }
-      else if (tag==='BS'){ d.bseed=parseInt(takeNum()||'0',10); }
-      else if (tag==='PX'){ d.gx=parseInt(takeNum()||'0',10); }
-      else if (tag==='PZ'){ d.gz=parseInt(takeNum()||'0',10); }
-      else if (tag==='FX'){ d.fx=parseInt(takeNum()||'0',10); }
-      else if (tag==='FZ'){ d.fz=parseInt(takeNum()||'0',10); }
-      else if (tag==='PY'){ d.y=parseInt(takeNum()||'2',10); }
-      else if (tag==='FL'){ d.fly=(parseInt(takeNum()||'0',10)===1); }
-      else if (tag==='YW'){ d.yaw=parseInt(takeNum()||'0',10); }
-      else if (tag==='PT'){ d.pitch=parseInt(takeNum()||'0',10); }
-      else if (tag==='TD'){ d.total=parseInt(takeNum()||'0',10); }
-      else if (tag==='LV'){ d.levels=parseInt(takeNum()||'0',10); }
-      else if (tag==='MP'){ d.map=(parseInt(takeNum()||'0',10)===1); }
-      else if (tag==='JP'){ d.jump=(parseInt(takeNum()||'0',10)===1); }
-      else if (tag==='DM'){ const s=takeNum()||'0'; d.mask=BigInt(s); }
-      else if (tag==='MI'){
-        const cnt=parseInt(takeNum()||'0',10);
-        for (let k=0;k<cnt;k++){
-          if (flat.slice(i,i+2)!=='MX') break; i+=2; const mx=parseInt(takeNum()||'0',10);
-          if (flat.slice(i,i+2)!=='MZ') break; i+=2; const mz=parseInt(takeNum()||'0',10);
-          d.mice.push({gx:mx,gz:mz});
-        }
-      } else {
-        // unknown tag: stop
-        break;
-      }
-    }
+    const flat = String(str).replace(/-/g,'').toUpperCase();
+    const bytes = b32decode(flat);
+    const json = new TextDecoder().decode(bytes);
+    const d = JSON.parse(json);
     return d;
   }
   function isValidSave(str){
     try{
       const d = decodeSave(str);
-      if (d.gx<0||d.gx>15||d.gz<0||d.gz>15) return false;
-      if (d.fx<0||d.fx>15||d.fz<0||d.fz>15) return false;
-      if (d.y<0||d.y>31) return false;
-      if (d.yaw<0||d.yaw>31||d.pitch<0||d.pitch>31) return false;
-      if (d.total<0||d.total>511) return false;
-      if (d.levels<0||d.levels>31) return false;
-      if (d.mice && d.mice.some(m=>m.gx<0||m.gx>15||m.gz<0||m.gz>15)) return false;
-      return true;
+      return d && typeof d==='object' && d.size>=1 && d.size<=50 && d.seeds && d.pos && d.progress;
     }catch{ return false; }
   }
 
@@ -1445,13 +1396,19 @@ async function loadLibs(){
     try{
       const d = decodeSave(str);
 
-      gameMode = d.mode ? 'biomes' : 'classic';
-      reseedMaze(d.mseed); reseedDiam(d.dseed); reseedBiome(d.bseed);
+      gameMode = (d.mode==='biomes') ? 'biomes' : 'classic';
+      sizeMul = clamp(parseInt(d.size||1,10),1,50);
+      const seeds = d.seeds||{};
+      reseedMaze(seeds.maze||mazeSeed); reseedDiam(seeds.diam||diamondsSeed); reseedBiome(seeds.biome||biomeSeed);
       // apply size before generating
       sizeMul = d.size || 1;
       mazeSize = BASE_MAZE_SIZE * sizeMul;
       toWin = BASE_TO_WIN * sizeMul;
       DIAMOND_COUNT = BASE_DIAMOND_COUNT * sizeMul;
+
+      // reset data structures
+      for (const m of mice){ try{ scene.remove(m.group); }catch{} }
+      mice.length = 0;
 
       maze = generateMaze(mazeSize, mazeSize);
       buildMazeMesh();
@@ -1465,28 +1422,28 @@ async function loadLibs(){
       mapUnlocked    = d.map;
       jumpUnlockedClassic = (gameMode==='classic') ? d.jump : false;
 
-      diamondCount = recalcCarryFromMask(d.mask);
+      const collected = Array.isArray(d.collected)? d.collected : [];
+      spawnDiamondsFromRef(maskFromCollectedList(collected));
+      diamondCount = collected.reduce((s,i)=>{
+        const t = diamondsRef[i]?.type; return s + (t==='S'?20:1);
+      },0);
 
       diamondUI.textContent=diamondCount; totalUI.textContent=totalDiamonds; levelsUI.textContent=levelsCleared;
       modeUI.textContent = (gameMode==='biomes'?'Biomes':'Classic');
 
-      const x = (d.gx + d.fx/15)*cellSize;
-      const z = (d.gz + d.fz/15)*cellSize;
-      controls.getObject().position.set(x, Math.max(2, d.y), z);
-
-      const yaw   = (d.yaw/31)*Math.PI*2;
-      const pitch = (d.pitch/31)*Math.PI*0.98 - Math.PI*0.49;
-      setView(yaw, pitch);
-
-      isFlying = d.fly && (gameMode!=='classic' || jumpUnlockedClassic);
+      const pos = d.pos||{};
+      controls.getObject().position.set(pos.x||((1+0.5)*cellSize), Math.max(2, pos.y||2), pos.z||((1+0.5)*cellSize));
+      setView(pos.yaw||0, clamp(pos.pitch||0, -Math.PI*0.49, Math.PI*0.49));
+      isFlying = !!pos.fly && (gameMode!=='classic' || jumpUnlockedClassic);
       velY=0; onGround = !isFlying && (controls.getObject().position.y<=2.01);
 
       // spawn mice from save
       if (gameMode==='biomes' && d.mice && d.mice.length){
         await ensureMouseModel();
         for (const m of d.mice){
-          // place only on passable cells
-          if (isPassableCell(m.gx, m.gz)){
+          const gx = clamp(parseInt(m.gx||0,10),0,maze[0].length-1);
+          const gz = clamp(parseInt(m.gz||0,10),0,maze.length-1);
+          if (isPassableCell(gx, gz)){
             let group;
             if (mouseModel) group = mouseModel.clone(true); else {
               group = new THREE.Group();
@@ -1511,9 +1468,9 @@ async function loadLibs(){
                 const l2 = new THREE.Mesh(legGeo, darkMat); l2.position.set(sx,0.2,-0.2); group.add(l2);
               }
             }
-            group.position.set((m.gx+0.5)*cellSize, MOUSE_HALF_H, (m.gz+0.5)*cellSize);
+            group.position.set((gx+0.5)*cellSize, MOUSE_HALF_H, (gz+0.5)*cellSize);
             scene.add(group);
-            mice.push({ group, target:null, lastCell:{x:m.gx,y:m.gz}, velY:0, onGround:true });
+            mice.push({ group, target:null, lastCell:{x:gx,y:gz}, velY:0, onGround:true, onWall:false, loot:0 });
           }
         }
       }
