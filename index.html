@@ -1012,7 +1012,8 @@ async function loadLibs(){
     for (let i=mice.length-1;i>=0;i--){
       const m = mice[i];
       const dx = pos.x - m.group.position.x, dz = pos.z - m.group.position.z;
-      if ((dx*dx + dz*dz) < 2.56){
+      const dy = Math.abs(pos.y - m.group.position.y);
+      if ((dx*dx + dz*dz) < 2.56 && dy < 1.0){
         const reward = 50 + m.loot;
         diamondCount += reward; totalDiamonds += reward; miceCaught++;
         diamondUI.textContent=diamondCount; totalUI.textContent=totalDiamonds; updateHUD();
@@ -1410,7 +1411,6 @@ async function loadLibs(){
       generateObstaclesIfNeeded();
       buildBiomeMeshes();
       generateDiamondsRef();
-      spawnDiamondsFromRef(d.mask);
 
       totalDiamonds  = d.total;
       levelsCleared  = d.levels;
